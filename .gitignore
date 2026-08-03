@@ -1,0 +1,80 @@
+# ==========================================
+# 🙈 GITIGNORE - LAAFI_AI_IVA ENGINE
+# ==========================================
+
+# 1. Environnement Virtuel & Python Bytecode
+.venv/
+venv/
+env/
+ENV/
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# 2. Fichiers Sensibles & Identifiants API
+.env
+.env.*
+kaggle.json
+*.key
+*.pem
+secrets.json
+
+# 3. Données & Datasets Lourds (Garder uniquement les .gitkeep)
+data/raw/*
+!data/raw/.gitkeep
+data/synthetic_masks/*
+!data/synthetic_masks/.gitkeep
+data/processed/*
+!data/processed/.gitkeep
+
+# 4. Modèles Checkpoints & Poids Binaires
+models/checkpoints/*
+!models/checkpoints/.gitkeep
+models/exported/*
+!models/exported/.gitkeep
+*.pt
+*.pth
+*.onnx
+*.bin
+*.engine
+*.h5
+*.ckpt
+
+# 5. Outputs, Logs & Graphiques
+outputs/figures/*
+!outputs/figures/.gitkeep
+outputs/reports/*
+!outputs/reports/.gitkeep
+outputs/logs/*
+!outputs/logs/.gitkeep
+*.log
+.tensorboard/
+
+# 6. IDEs & Documents de Spécifications Internes (Obsidian / Agent Specs)
+.obsidian/
+.idea/
+.vscode/
+.DS_Store
+AGENT.md
+COMMON_MISTAKE_TO_AVOID.md
+LAAFI_AI_IVA_KANBAN-BOARD.md
+MEMORY.MD
+skills_report.md

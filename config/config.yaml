@@ -1,0 +1,57 @@
+# ==========================================
+# ⚙️ CONFIGURATION GLOBALE - LAAFI_AI IVA
+# ==========================================
+
+project:
+  name: "LAAFI_AI_IVA"
+  version: "2.0"
+  seed: 42
+
+paths:
+  raw_data_dir: "./data/raw"
+  synthetic_masks_dir: "./data/synthetic_masks"
+  processed_data_dir: "./data/processed"
+  checkpoints_dir: "./models/checkpoints"
+  exported_dir: "./models/exported"
+  outputs_dir: "./outputs"
+  figures_dir: "./outputs/figures"
+  reports_dir: "./outputs/reports"
+  logs_dir: "./outputs/logs"
+
+dataset:
+  kaggle_dataset: "intel-mobileodt-cervical-cancer-screening"
+  img_size: [384, 384]
+  train_ratio: 0.70
+  val_ratio: 0.15
+  test_ratio: 0.15
+  num_perlin_masks: 1000
+
+stage1_yolo:
+  model_type: "yolov8n-det" # ou yolov11n-det
+  epochs: 50
+  batch_size: 16
+  img_size: 640
+  confidence_threshold: 0.25
+
+stage2_classifier:
+  backbone: "convnext_base" # ou swin_base_patch4_window12_384
+  num_classes: 2
+  epochs: 30
+  batch_size: 32
+  learning_rate: 1.0e-4
+  weight_decay: 1.0e-2
+  focal_loss_gamma: 2.0
+  focal_loss_alpha: 0.75
+  threshold_calibration:
+    min_t: 0.10
+    max_t: 0.40
+    step: 0.01
+    target_recall: 0.95
+
+augmentations:
+  hue_shift_limit: 0.05
+  sat_shift_limit: 0.20
+  val_shift_limit: 0.25
+  defocus_radius: [1, 4]
+  motion_blur_limit: [3, 9]
+  perlin_noise_proba: 0.30
