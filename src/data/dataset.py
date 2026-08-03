@@ -20,6 +20,16 @@ class IVADataset(Dataset):
     ):
         self.is_train = is_train
         self.perlin_proba = perlin_proba
+        
+        # Redirection automatique vers SSD local Colab si présent
+        if os.path.exists("/content/data_fast/processed"):
+            csv_file_fast = csv_file.replace("./data", "/content/data_fast").replace("/content/drive/MyDrive/LAAFI_AI_IVA/data", "/content/data_fast")
+            if os.path.exists(csv_file_fast):
+                csv_file = csv_file_fast
+
+        if os.path.exists("/content/data_fast/synthetic_masks"):
+            masks_dir = "/content/data_fast/synthetic_masks"
+
         self.perlin_loader = FastPerlinNoiseLoader(masks_dir=masks_dir)
         self.transform = build_iva_augmentation_pipeline(is_train=is_train)
         
@@ -39,11 +49,11 @@ class IVADataset(Dataset):
         else:
             self.df['target'] = 0
 
-        # Optimisation SSD Local Colab : Remplacement dynamique des chemins Drive vers SSD local si présent
+        # Remplacement dynamique des chemins d'accès vers le SSD local /content/data_fast
         if os.path.exists("/content/data_fast"):
             self.df['filepath'] = self.df['filepath'].apply(
-                lambda p: p.replace("/content/drive/MyDrive/LAAFI_AI_IVA/data", "/content/data_fast")
-                           .replace("./data", "/content/data_fast")
+                lambda p: str(p).replace("/content/drive/MyDrive/LAAFI_AI_IVA/data", "/content/data_fast")
+                                .replace("./data", "/content/data_fast")
             )
 
     def __len__(self) -> int:
@@ -51,11 +61,11 @@ class IVADataset(Dataset):
 
     def __getitem__(self, idx: int):
         row = self.df.iloc[idx]
-        img_path = row['filepath']
-        target = row['target']
+        img_path = str(row['filepath'])
+        target = int(row['target'])
         patient_id = row.get('patient_id', 'unknown')
 
-        # Lecture de l'image (BGR -> RGB)
+        # Lecture rapide de l'image (BGR -> RGB)
         image = None
         if os.path.exists(img_path):
             image = cv2.imread(img_path)

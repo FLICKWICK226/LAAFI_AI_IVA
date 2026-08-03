@@ -6,7 +6,6 @@ import pandas as pd
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
-from torch.cuda.amp import GradScaler, autocast
 from tqdm import tqdm
 
 from src.utils.seed import seed_everything
@@ -25,17 +24,18 @@ def train_laafi_ai_model(config_path: str = "./config/config.yaml") -> None:
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"🖥️ Exécution de l'entraînement sur : {device}")
 
-    # OPTIMISATION PERFS 1 : Multi-worker DataLoader & persistent_workers
-    num_workers = 4 if device.type == 'cuda' else 0
-    pin_memory = True if device.type == 'cuda' else False
-
-    # OPTIMISATION PERFS 2 : Dynamic SSD Local Mirroring sous Colab
-    if 'google.colab' in sys.modules and os.path.exists("/content/drive/MyDrive/LAAFI_AI_IVA/data"):
+    # OPTIMISATION 1 : Mirroring SSD Local Colab (/content/data_fast) AVANT instanciation des Datasets
+    if 'google.colab' in sys.modules or os.path.exists("/content/drive/MyDrive/LAAFI_AI_IVA/data"):
+        drive_data_dir = "/content/drive/MyDrive/LAAFI_AI_IVA/data"
         fast_data_dir = "/content/data_fast"
-        if not os.path.exists(fast_data_dir):
+        if os.path.exists(drive_data_dir) and not os.path.exists(fast_data_dir):
             print("🚀 Copie unique des données du Google Drive vers le SSD Local Colab (accélération x20)...")
-            os.system(f"cp -r /content/drive/MyDrive/LAAFI_AI_IVA/data {fast_data_dir}")
+            os.system(f"cp -r {drive_data_dir} {fast_data_dir}")
             print("✅ Copie terminée ! L'entraînement s'exécute désormais sur le SSD local ultra-rapide.")
+
+    # OPTIMISATION 2 : Adapte num_workers au nombre de Cœurs CPU réels de Colab (2 cœurs sur Colab T4 free)
+    num_workers = min(2, os.cpu_count() or 2) if device.type == 'cuda' else 0
+    pin_memory = True if device.type == 'cuda' else False
 
     os.makedirs(cfg['paths']['checkpoints_dir'], exist_ok=True)
     os.makedirs(cfg['paths']['logs_dir'], exist_ok=True)
@@ -95,7 +95,8 @@ def train_laafi_ai_model(config_path: str = "./config/config.yaml") -> None:
         T_max=cfg['stage2_classifier']['epochs']
     )
     
-    scaler = GradScaler(enabled=(device.type == 'cuda'))
+    # Modern PyTorch 2.6 GradScaler
+    scaler = torch.amp.GradScaler('cuda', enabled=(device.type == 'cuda'))
     best_val_auc = 0.0
     start_epoch = 1
 
@@ -104,17 +105,18 @@ def train_laafi_ai_model(config_path: str = "./config/config.yaml") -> None:
     if os.path.exists(latest_checkpoint_path):
         print(f"🔄 Checkpoint de reprise trouvé : {latest_checkpoint_path}")
         try:
-            checkpoint = torch.load(latest_checkpoint_path, map_location=device)
+            # PyTorch 2.6 compatibility: weights_only=False pour charger les scalaires d'optimiseur/historique
+            checkpoint = torch.load(latest_checkpoint_path, map_location=device, weights_only=False)
             model.load_state_dict(checkpoint['model_state_dict'])
             optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
             scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
-            if 'scaler_state_dict' in checkpoint and scaler is not None:
+            if 'scaler_state_dict' in checkpoint and scaler is not None and checkpoint['scaler_state_dict'] is not None:
                 scaler.load_state_dict(checkpoint['scaler_state_dict'])
             start_epoch = checkpoint['epoch'] + 1
             best_val_auc = checkpoint.get('best_val_auc', 0.0)
             print(f"✅ Reprise réussie à l'epoch {start_epoch} (Dernier meilleur Val AUC : {best_val_auc:.4f})")
         except Exception as e_res:
-            print(f"⚠️ Impossible de charger le checkpoint : {e_res}")
+            print(f"⚠️ Impossible de charger le checkpoint ({e_res}). Démarrage à zéro.")
 
     if start_epoch > cfg['stage2_classifier']['epochs']:
         print(f"🎉 Entraînement déjà achevé ({cfg['stage2_classifier']['epochs']} epochs).")
@@ -130,7 +132,8 @@ def train_laafi_ai_model(config_path: str = "./config/config.yaml") -> None:
             targets = targets.to(device, non_blocking=True)
             optimizer.zero_grad()
 
-            with autocast(enabled=(device.type == 'cuda')):
+            # Modern PyTorch 2.6 autocast
+            with torch.amp.autocast('cuda', enabled=(device.type == 'cuda')):
                 outputs = model(images)
                 loss_elig = criterion_eligibility(outputs['eligibility'], targets)
                 targets_patho = (targets > 0).long()
@@ -152,7 +155,7 @@ def train_laafi_ai_model(config_path: str = "./config/config.yaml") -> None:
         with torch.no_grad():
             for images, targets, _ in val_loader:
                 images = images.to(device, non_blocking=True)
-                with autocast(enabled=(device.type == 'cuda')):
+                with torch.amp.autocast('cuda', enabled=(device.type == 'cuda')):
                     outputs = model(images)
                     probs = torch.softmax(outputs['pathology'], dim=1)[:, 1]
                 val_targets.extend((targets > 0).cpu().numpy())
@@ -217,7 +220,7 @@ def train_laafi_ai_model(config_path: str = "./config/config.yaml") -> None:
         with open(json_report_path, 'w', encoding='utf-8') as f_json:
             json.dump(history, f_json, indent=4)
 
-        # Checkpoints
+        # Checkpoint de sécurité
         latest_dict = {
             'epoch': epoch,
             'model_state_dict': model.state_dict(),
