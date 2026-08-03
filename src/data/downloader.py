@@ -1,25 +1,35 @@
 import os
 import sys
 
-def download_intel_mobileodt_dataset(target_data_path: str = "./data/raw") -> None:
+def download_intel_mobileodt_dataset(target_data_path: str = "./data/raw") -> str:
     """
     Télécharge et extrait le dataset Kaggle 'intel-mobileodt-cervical-cancer-screening'
-    en utilisant la clé API Colab 'KAGGLE_API_KEY' sans injection de commande shell.
+    ou détecte automatiquement son montage natif sous Kaggle (/kaggle/input/).
     """
+    # 1. Détection automatique du montage natif Kaggle (/kaggle/input/)
+    kaggle_inputs = [
+        "/kaggle/input/intel-mobileodt-cervical-cancer-screening",
+        "/kaggle/input/intel-mobileodt-cervical-cancer-screening/train/train"
+    ]
+    for k_in in kaggle_inputs:
+        train_dir = os.path.join(k_in, "train")
+        if os.path.exists(k_in) and os.path.exists(train_dir) and len(os.listdir(train_dir)) > 0:
+            print(f"⚡ Zero-Download Mode : Dataset monté nativement dans : {k_in}")
+            return k_in
+
     os.makedirs(target_data_path, exist_ok=True)
     
-    # Vérification de l'existence des données
+    # Vérification de l'existence locale des données
     train_dir = os.path.join(target_data_path, "train")
     train_alt_dir = os.path.join(target_data_path, "train", "train")
     
     if (os.path.exists(train_dir) and len(os.listdir(train_dir)) > 0) or \
        (os.path.exists(train_alt_dir) and len(os.listdir(train_alt_dir)) > 0):
         print(f"✅ Dataset déjà présent dans : {target_data_path} (Téléchargement ignoré)")
-        return
+        return target_data_path
 
-    print("📥 Initialisation de l'accès aux données via la clé API Colab...")
+    print("📥 Initialisation de l'accès aux données via la clé API Colab/Kaggle...")
 
-    # Configuration exclusive depuis Colab userdata
     if "google.colab" in sys.modules:
         try:
             from google.colab import userdata
@@ -63,7 +73,6 @@ def download_intel_mobileodt_dataset(target_data_path: str = "./data/raw") -> No
             for member in tqdm(members, desc="Extraction Zip"):
                 zip_ref.extract(member, extract_to)
 
-    # Ingestion via l'API officielle PyKaggle (Sécurisée sans os.system)
     try:
         print(f"🔄 Téléchargement via l'API Kaggle officielle : {competition_name}...")
         kaggle.api.competition_download_files(competition_name, path=target_data_path)
@@ -78,6 +87,8 @@ def download_intel_mobileodt_dataset(target_data_path: str = "./data/raw") -> No
     except Exception as e:
         print(f"❌ Échec de l'ingestion Kaggle API : {e}")
         print("💡 SI VOUS AVEZ UNE ERREUR 403 : Rendez-vous sur https://www.kaggle.com/c/intel-mobileodt-cervical-cancer-screening/rules et cliquez sur 'I Understand and Accept'.")
+
+    return target_data_path
 
 if __name__ == "__main__":
     download_intel_mobileodt_dataset()
