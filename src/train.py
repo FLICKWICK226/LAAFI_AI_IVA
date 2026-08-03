@@ -11,7 +11,13 @@ from tqdm import tqdm
 # Anti-fragmentation mémoire VRAM CUDA
 os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
 
+import importlib
 from src.utils.seed import seed_everything
+import src.data.augmentations
+import src.data.dataset
+importlib.reload(src.data.augmentations)
+importlib.reload(src.data.dataset)
+
 from src.data.dataset import IVADataset
 from src.models.classifier_lesion import IVALesionClassifierStage2
 from src.utils.metrics import FocalLoss, calculate_clinical_metrics
