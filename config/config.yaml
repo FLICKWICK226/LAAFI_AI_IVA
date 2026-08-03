@@ -34,10 +34,10 @@ stage1_yolo:
   confidence_threshold: 0.25
 
 stage2_classifier:
-  backbone: "convnext_base" # ou swin_base_patch4_window12_384
+  backbone: "convnext_base"
   num_classes: 2
   epochs: 30
-  batch_size: 32
+  batch_size: 16  # Réduit de 32 à 16 pour la VRAM Colab T4 (15 Go)
   learning_rate: 1.0e-4
   weight_decay: 1.0e-2
   focal_loss_gamma: 2.0

@@ -8,8 +8,8 @@ from src.data.augmentations import FastPerlinNoiseLoader, build_iva_augmentation
 
 class IVADataset(Dataset):
     """
-    Dataset PyTorch personnalisable pour l'imagerie IVA du col de l'utérus.
-    Intègre les augmentations optiques et l'injection dynamique de masques de bruit biologique.
+    Dataset PyTorch hautement optimisé pour l'imagerie IVA du col de l'utérus.
+    Résout automatiquement les chemins Google Drive FUSE vers le SSD local rapide.
     """
     def __init__(
         self,
@@ -32,16 +32,19 @@ class IVADataset(Dataset):
         # Mappage des labels anatomiques en entiers
         label_map = {'Type_1': 0, 'Type_2': 1, 'Type_3': 2}
         if 'label' in self.df.columns and len(self.df) > 0:
-            # Ne JAMAIS imputer silencieusement un label manquant par 0. Filtrer les labels inconnus.
             valid_mask = self.df['label'].astype(str).isin(label_map.keys())
             if not valid_mask.all():
-                invalid_count = len(self.df) - valid_mask.sum()
-                print(f"⚠️ Warning: {invalid_count} ligne(s) sans label valide détectée(s) et exclue(s).")
                 self.df = self.df[valid_mask].copy()
-            
             self.df['target'] = self.df['label'].map(label_map).astype(int)
         else:
             self.df['target'] = 0
+
+        # Optimisation SSD Local Colab : Remplacement dynamique des chemins Drive vers SSD local si présent
+        if os.path.exists("/content/data_fast"):
+            self.df['filepath'] = self.df['filepath'].apply(
+                lambda p: p.replace("/content/drive/MyDrive/LAAFI_AI_IVA/data", "/content/data_fast")
+                           .replace("./data", "/content/data_fast")
+            )
 
     def __len__(self) -> int:
         return len(self.df)
@@ -53,11 +56,14 @@ class IVADataset(Dataset):
         patient_id = row.get('patient_id', 'unknown')
 
         # Lecture de l'image (BGR -> RGB)
+        image = None
         if os.path.exists(img_path):
             image = cv2.imread(img_path)
+        
+        if image is not None and image.size > 0:
             image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
         else:
-            # Image factice de remplacement si le dataset n'est pas encore téléchargé
+            # Fallback image noire si fichier illisible
             image = np.zeros((384, 384, 3), dtype=np.uint8)
 
         # Injection dynamique de masques de bruit biologiques (uniquement en train)

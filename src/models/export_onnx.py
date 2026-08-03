@@ -15,8 +15,13 @@ def export_model_to_onnx(
     
     model = IVALesionClassifierStage2(pretrained=False)
     if os.path.exists(checkpoint_path):
-        model.load_state_dict(torch.load(checkpoint_path, map_location=device))
-        print(f"✅ Checkpoint chargé depuis : {checkpoint_path}")
+        try:
+            ckpt = torch.load(checkpoint_path, map_location=device, weights_only=True)
+            state_dict = ckpt['model_state_dict'] if isinstance(ckpt, dict) and 'model_state_dict' in ckpt else ckpt
+            model.load_state_dict(state_dict)
+            print(f"✅ Checkpoint chargé avec succès depuis : {checkpoint_path}")
+        except Exception as e:
+            print(f"⚠️ Erreur lors du chargement du checkpoint ({e}). Exportation de la structure du modèle.")
     else:
         print("⚠️ Aucun checkpoint trouvé, exportation du modèle non entraîné à des fins de structure.")
 

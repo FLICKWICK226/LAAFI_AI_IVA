@@ -5,22 +5,33 @@ import albumentations as A
 
 class FastPerlinNoiseLoader:
     """
-    Chargeur haute performance de masques de bruit de Perlin pré-générés.
-    Simule la présence de sang et de glaire par Alpha Blending sans ralentissement CPU.
+    Chargeur ultra-haute performance de masques de bruit de Perlin.
+    Mise en cache intégrale en RAM pour 0 ms d'E/S disque pendant l'entraînement.
     """
-    def __init__(self, masks_dir: str = "./data/synthetic_masks"):
+    def __init__(self, masks_dir: str = "./data/synthetic_masks", max_cached_masks: int = 1000):
         self.masks_dir = masks_dir
-        self.mask_files = []
+        self.masks_cache = []
+        
         if os.path.exists(masks_dir):
-            self.mask_files = [os.path.join(masks_dir, f) for f in os.listdir(masks_dir) if f.endswith('.npy')]
+            mask_files = [os.path.join(masks_dir, f) for f in os.listdir(masks_dir) if f.endswith('.npy')][:max_cached_masks]
+            if mask_files:
+                # Pre-loading en RAM
+                for mf in mask_files:
+                    try:
+                        m = np.load(mf).astype(np.float32)
+                        self.masks_cache.append(m)
+                    except Exception:
+                        pass
+                print(f"🚀 {len(self.masks_cache)} masques Perlin pré-chargés en RAM (0 ms E/S).")
 
     def add_blood_or_mucus(self, image: np.ndarray, noise_type: str = 'blood', max_alpha: float = 0.4) -> np.ndarray:
-        if not self.mask_files:
-            return image  # Fallback si les masques ne sont pas encore disponibles
+        if not self.masks_cache:
+            return image  # Fallback rapide si aucun masque en RAM
             
         h, w, c = image.shape
-        mask_path = np.random.choice(self.mask_files)
-        perlin = np.load(mask_path)
+        # Choix instantané en mémoire
+        idx = np.random.randint(0, len(self.masks_cache))
+        perlin = self.masks_cache[idx]
         
         if perlin.shape != (h, w):
             perlin = cv2.resize(perlin, (w, h), interpolation=cv2.INTER_LINEAR)

@@ -4,7 +4,7 @@ import sys
 def download_intel_mobileodt_dataset(target_data_path: str = "./data/raw") -> None:
     """
     Télécharge et extrait le dataset Kaggle 'intel-mobileodt-cervical-cancer-screening'
-    en utilisant exclusivement la clé API Colab 'KAGGLE_API_KEY'.
+    en utilisant la clé API Colab 'KAGGLE_API_KEY' sans injection de commande shell.
     """
     os.makedirs(target_data_path, exist_ok=True)
     
@@ -19,7 +19,7 @@ def download_intel_mobileodt_dataset(target_data_path: str = "./data/raw") -> No
 
     print("📥 Initialisation de l'accès aux données via la clé API Colab...")
 
-    # Configuration exclusive depuis Colab userdata (sans exception sur secret manquant)
+    # Configuration exclusive depuis Colab userdata
     if "google.colab" in sys.modules:
         try:
             from google.colab import userdata
@@ -50,7 +50,6 @@ def download_intel_mobileodt_dataset(target_data_path: str = "./data/raw") -> No
             print(f"⚠️ Erreur lors de la lecture du secret Colab : {e}")
 
     competition_name = "intel-mobileodt-cervical-cancer-screening"
-    dataset_mirror = "FLICKWICK/intel-mobileodt-cervical-cancer-screening"
     
     import kaggle
     import zipfile
@@ -60,38 +59,24 @@ def download_intel_mobileodt_dataset(target_data_path: str = "./data/raw") -> No
     def extract_with_progress(zip_path, extract_to):
         with zipfile.ZipFile(zip_path, 'r') as zip_ref:
             members = zip_ref.namelist()
-            print(f"📂 Extractions de {len(members)} fichiers depuis {os.path.basename(zip_path)}...")
+            print(f"📂 Extraction de {len(members)} fichiers depuis {os.path.basename(zip_path)}...")
             for member in tqdm(members, desc="Extraction Zip"):
                 zip_ref.extract(member, extract_to)
 
-    # 1. Tentative via la compétition officielle Kaggle
+    # Ingestion via l'API officielle PyKaggle (Sécurisée sans os.system)
     try:
-        print(f"🔄 Tentative via la compétition officielle Kaggle : {competition_name}...")
+        print(f"🔄 Téléchargement via l'API Kaggle officielle : {competition_name}...")
         kaggle.api.competition_download_files(competition_name, path=target_data_path)
         
-        # Dézippage avec barre de progression
         for item in os.listdir(target_data_path):
             if item.endswith(".zip"):
                 zip_ref_path = os.path.join(target_data_path, item)
                 extract_with_progress(zip_ref_path, target_data_path)
                 os.remove(zip_ref_path)
                 
-        print(f"🎉 Téléchargement et extraction de la compétition réussis dans : {target_data_path}")
-        return
+        print(f"🎉 Téléchargement et extraction réussis dans : {target_data_path}")
     except Exception as e:
-        print(f"⚠️ Compétition inaccessible ({e}), tentative via la commande shell Kaggle...")
-
-    # 2. Tentative de secours via la commande CLI Kaggle officielle
-    try:
-        os.system(f"kaggle competitions download -c {competition_name} -p {target_data_path}")
-        for item in os.listdir(target_data_path):
-            if item.endswith(".zip"):
-                zip_ref_path = os.path.join(target_data_path, item)
-                extract_with_progress(zip_ref_path, target_data_path)
-                os.remove(zip_ref_path)
-        print(f"🎉 Téléchargement réussi via la commande CLI dans : {target_data_path}")
-    except Exception as e_cli:
-        print(f"❌ Erreur lors du téléchargement : {e_cli}")
+        print(f"❌ Échec de l'ingestion Kaggle API : {e}")
         print("💡 SI VOUS AVEZ UNE ERREUR 403 : Rendez-vous sur https://www.kaggle.com/c/intel-mobileodt-cervical-cancer-screening/rules et cliquez sur 'I Understand and Accept'.")
 
 if __name__ == "__main__":
