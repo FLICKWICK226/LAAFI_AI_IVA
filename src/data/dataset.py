@@ -32,7 +32,14 @@ class IVADataset(Dataset):
         # Mappage des labels anatomiques en entiers
         label_map = {'Type_1': 0, 'Type_2': 1, 'Type_3': 2}
         if 'label' in self.df.columns and len(self.df) > 0:
-            self.df['target'] = self.df['label'].map(lambda x: label_map.get(str(x), 0))
+            # Ne JAMAIS imputer silencieusement un label manquant par 0. Filtrer les labels inconnus.
+            valid_mask = self.df['label'].astype(str).isin(label_map.keys())
+            if not valid_mask.all():
+                invalid_count = len(self.df) - valid_mask.sum()
+                print(f"⚠️ Warning: {invalid_count} ligne(s) sans label valide détectée(s) et exclue(s).")
+                self.df = self.df[valid_mask].copy()
+            
+            self.df['target'] = self.df['label'].map(label_map).astype(int)
         else:
             self.df['target'] = 0
 

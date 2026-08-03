@@ -86,9 +86,33 @@ def train_laafi_ai_model(config_path: str = "./config/config.yaml") -> None:
     
     scaler = GradScaler(enabled=(device.type == 'cuda'))
     best_val_auc = 0.0
+    start_epoch = 1
 
-    print("🚀 Début de la boucle d'entraînement...")
-    for epoch in range(1, cfg['stage2_classifier']['epochs'] + 1):
+    # -------------------------------------------------------------
+    # Système Restart-Safe : Reprise Automatique depuis latest_checkpoint.pt
+    # -------------------------------------------------------------
+    latest_checkpoint_path = os.path.join(cfg['paths']['checkpoints_dir'], "latest_checkpoint.pt")
+    if os.path.exists(latest_checkpoint_path):
+        print(f"🔄 Checkpoint de reprise trouvé : {latest_checkpoint_path}")
+        try:
+            checkpoint = torch.load(latest_checkpoint_path, map_location=device)
+            model.load_state_dict(checkpoint['model_state_dict'])
+            optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+            scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
+            if 'scaler_state_dict' in checkpoint and scaler is not None:
+                scaler.load_state_dict(checkpoint['scaler_state_dict'])
+            start_epoch = checkpoint['epoch'] + 1
+            best_val_auc = checkpoint.get('best_val_auc', 0.0)
+            print(f"✅ Reprise réussie à l'epoch {start_epoch} (Dernier meilleur Val AUC : {best_val_auc:.4f})")
+        except Exception as e_res:
+            print(f"⚠️ Impossible de charger le checkpoint de reprise ({e_res}). Démarrage d'un nouvel entraînement.")
+
+    if start_epoch > cfg['stage2_classifier']['epochs']:
+        print(f"🎉 L'entraînement est déjà terminé ({cfg['stage2_classifier']['epochs']} epochs effectuées).")
+        return
+
+    print(f"🚀 Début/Reprise de la boucle d'entraînement de l'epoch {start_epoch} à {cfg['stage2_classifier']['epochs']}...")
+    for epoch in range(start_epoch, cfg['stage2_classifier']['epochs'] + 1):
         model.train()
         train_loss = 0.0
         
@@ -129,15 +153,113 @@ def train_laafi_ai_model(config_path: str = "./config/config.yaml") -> None:
         val_targets = np.array(val_targets)
         val_probs = np.array(val_probs)
         
-        metrics = calculate_clinical_metrics(val_targets, val_probs, threshold=0.5) if len(val_targets) > 0 else {"auc_roc": 0.5, "sensitivity": 0.0}
+        # Recherche du seuil optimal maximisant le Score F2 avec Sensibilité (Recall) >= 95%
+        best_threshold = 0.5
+        best_metrics = {"auc_roc": 0.5, "sensitivity": 0.0, "f2_score": 0.0}
+        
+        if len(val_targets) > 0 and len(np.unique(val_targets)) > 1:
+            for thresh in np.arange(0.1, 0.9, 0.05):
+                m = calculate_clinical_metrics(val_targets, val_probs, threshold=thresh)
+                if m['sensitivity'] >= 0.95 and m['f2_score'] > best_metrics['f2_score']:
+                    best_metrics = m
+                    best_threshold = thresh
+            # Si aucun seuil ne donne >= 95% de sensibilité, prendre le seuil maximisant le score F2
+            if best_metrics['sensitivity'] == 0.0:
+                for thresh in np.arange(0.1, 0.9, 0.05):
+                    m = calculate_clinical_metrics(val_targets, val_probs, threshold=thresh)
+                    if m['f2_score'] > best_metrics['f2_score']:
+                        best_metrics = m
+                        best_threshold = thresh
 
-        print(f"📊 Epoch {epoch} | Loss: {train_loss:.4f} | Val AUC: {metrics['auc_roc']:.4f} | Sensibilité: {metrics['sensitivity']*100:.1f}%")
+        print(f"📊 Epoch {epoch} | Loss: {train_loss:.4f} | Val AUC: {best_metrics['auc_roc']:.4f} | Sensibilité: {best_metrics['sensitivity']*100:.1f}% | Score F2: {best_metrics.get('f2_score', 0):.4f} (Seuil: {best_threshold:.2f})")
 
-        # Sauvegarde du Meilleur Checkpoint
-        if metrics['auc_roc'] >= best_val_auc:
-            best_val_auc = metrics['auc_roc']
+        # -------------------------------------------------------------
+        # Enregistrement & Mise à jour dynamique du Rapport d'Entraînement après chaque Epoch
+        # -------------------------------------------------------------
+        reports_dir = cfg['paths']['reports_dir']
+        figures_dir = cfg['paths']['figures_dir']
+        os.makedirs(reports_dir, exist_ok=True)
+        os.makedirs(figures_dir, exist_ok=True)
+
+        epoch_log = {
+            "epoch": epoch,
+            "train_loss": float(train_loss),
+            "val_auc": float(best_metrics['auc_roc']),
+            "val_sensitivity": float(best_metrics['sensitivity']),
+            "val_specificity": float(best_metrics.get('specificity', 0.0)),
+            "val_f2_score": float(best_metrics.get('f2_score', 0.0)),
+            "best_threshold": float(best_threshold)
+        }
+
+        # 1. Mise à jour du CSV d'historique
+        csv_report_path = os.path.join(reports_dir, "training_history.csv")
+        df_log = pd.DataFrame([epoch_log])
+        if not os.path.exists(csv_report_path):
+            df_log.to_csv(csv_report_path, index=False)
+        else:
+            df_log.to_csv(csv_report_path, mode='a', header=False, index=False)
+
+        # 2. Mise à jour du JSON de rapport global
+        import json
+        json_report_path = os.path.join(reports_dir, "training_summary.json")
+        history = []
+        if os.path.exists(json_report_path):
+            try:
+                with open(json_report_path, 'r', encoding='utf-8') as f_json:
+                    history = json.load(f_json)
+            except Exception:
+                history = []
+        history.append(epoch_log)
+        with open(json_report_path, 'w', encoding='utf-8') as f_json:
+            json.dump(history, f_json, indent=4)
+
+        # 3. Génération dynamique des courbes d'apprentissage (Loss & AUC)
+        try:
+            import matplotlib.pyplot as plt
+            df_hist = pd.DataFrame(history)
+            fig, ax1 = plt.subplots(figsize=(10, 5))
+            
+            ax1.set_xlabel('Epoch')
+            ax1.set_ylabel('Train Loss', color='tab:red')
+            ax1.plot(df_hist['epoch'], df_hist['train_loss'], color='tab:red', marker='o', label='Train Loss')
+            ax1.tick_params(axis='y', labelcolor='tab:red')
+
+            ax2 = ax1.twinx()
+            ax2.set_ylabel('Val AUC & F2', color='tab:blue')
+            ax2.plot(df_hist['epoch'], df_hist['val_auc'], color='tab:blue', marker='s', label='Val AUC')
+            ax2.plot(df_hist['epoch'], df_hist['val_f2_score'], color='tab:green', marker='^', linestyle='--', label='Val F2')
+            ax2.tick_params(axis='y', labelcolor='tab:blue')
+
+            plt.title(f"LAAFI_AI Stage 2 - Courbes d'Entraînement (Epoch {epoch})")
+            fig.tight_layout()
+            plt.savefig(os.path.join(figures_dir, "learning_curves.png"), dpi=150)
+            plt.close()
+        except Exception as e_plot:
+            print(f"⚠️ Remarque lors du tracé de la courbe : {e_plot}")
+
+        # 4. Sauvegarde systématique de latest_checkpoint.pt (Restart-Safe)
+        latest_dict = {
+            'epoch': epoch,
+            'model_state_dict': model.state_dict(),
+            'optimizer_state_dict': optimizer.state_dict(),
+            'scheduler_state_dict': scheduler.state_dict(),
+            'scaler_state_dict': scaler.state_dict() if scaler else None,
+            'best_threshold': best_threshold,
+            'best_val_auc': best_val_auc
+        }
+        torch.save(latest_dict, latest_checkpoint_path)
+        print(f"🔄 Checkpoint de sécurité mis à jour : {latest_checkpoint_path}")
+
+        # 5. Sauvegarde du Meilleur Checkpoint (best_model.pt) basé sur AUC & F2
+        if best_metrics['auc_roc'] >= best_val_auc:
+            best_val_auc = best_metrics['auc_roc']
             best_path = os.path.join(cfg['paths']['checkpoints_dir'], "best_model.pt")
-            torch.save(model.state_dict(), best_path)
+            torch.save({
+                'epoch': epoch,
+                'model_state_dict': model.state_dict(),
+                'best_threshold': best_threshold,
+                'val_auc': best_val_auc
+            }, best_path)
             print(f"💾 Nouveau meilleur modèle sauvegardé dans : {best_path}")
 
     # Purge VRAM en fin d'entraînement

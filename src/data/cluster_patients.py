@@ -18,15 +18,21 @@ def generate_patient_clusters_and_splits(
     image_paths = []
     labels = []
     
+    from tqdm import tqdm
+    print("🔍 Recherche et indexation des images pour le découpage par patient...")
+    
+    # Collecte préalable pour barre de progression
+    all_files = []
     for root, dirs, files in os.walk(data_raw_dir):
         for f in files:
             if f.lower().endswith(('.jpg', '.jpeg', '.png')):
-                full_path = os.path.join(root, f)
-                # Extraire le label anatomique (Type_1, Type_2, Type_3) à partir du sous-dossier
-                parent_dir = os.path.basename(os.path.dirname(full_path))
-                if parent_dir in ['Type_1', 'Type_2', 'Type_3']:
-                    image_paths.append(full_path)
-                    labels.append(parent_dir)
+                all_files.append(os.path.join(root, f))
+
+    for full_path in tqdm(all_files, desc="Indexation des images"):
+        parent_dir = os.path.basename(os.path.dirname(full_path))
+        if parent_dir in ['Type_1', 'Type_2', 'Type_3']:
+            image_paths.append(full_path)
+            labels.append(parent_dir)
 
     if len(image_paths) == 0:
         print(f"⚠️ Aucune image trouvée dans {data_raw_dir}. Assurez-vous d'avoir exécuté le downloader.")
@@ -41,29 +47,35 @@ def generate_patient_clusters_and_splits(
     df = pd.DataFrame({'filepath': image_paths, 'label': labels})
     
     # -------------------------------------------------------------
-    # Groupement Patient : Extraction du préfixe ou Clustering Visuel
-    # Dans MobileODT, les séquences de photos partagent souvent des préfixes
-    # ou une empreinte visuelle proche.
+    # Groupement Patient : Extraction robuste de l'identifiant patient
+    # Pour éviter le Data Leakage, chaque image doit impérativement être associée à un patient.
     # -------------------------------------------------------------
     def extract_patient_id(path):
         filename = os.path.basename(path)
-        # Stratégie de secours basée sur le nom de fichier ou identifiant unique
         base_name = os.path.splitext(filename)[0]
         parts = base_name.split('_')
-        if len(parts) > 1 and parts[0].isdigit():
+        # Si le pattern <patient_id>_<img_id> existe
+        if len(parts) >= 2 and (parts[0].isdigit() or parts[0].isalnum()):
             return f"patient_{parts[0]}"
+        # En l'absence de pattern clair, isoler par dossier parent ou identifiant unique explicite
         return f"patient_{base_name}"
 
     df['patient_id'] = df['filepath'].apply(extract_patient_id)
+
+    # Vérification d'intégrité avant splitting
+    if df['patient_id'].isnull().any():
+        raise ValueError("❌ Erreur critique : Des valeurs nulles ont été détectées dans les patient_id !")
     
-    # GroupKFold pour scinder en Train (70%), Val (15%), Test (15%)
-    gkf = GroupKFold(n_splits=5) # 5 folds = ~20% par fold
-    folds = list(gkf.split(df, df['label'], df['patient_id']))
+    # Séparation robuste avec StratifiedGroupKFold (5 Folds = 20% par fold)
+    from sklearn.model_selection import StratifiedGroupKFold
+    sgkf = StratifiedGroupKFold(n_splits=5, shuffle=True, random_state=seed)
+    
+    folds = list(sgkf.split(df, df['label'], df['patient_id']))
     
     # Fold 0 = Test (20%), Fold 1 = Val (20%), Folds 2,3,4 = Train (60%)
     train_idx, test_idx = folds[0][0], folds[0][1]
     val_idx = folds[1][1]
-    train_idx = [i for i in train_idx if i not in val_idx]
+    train_idx = np.array([i for i in train_idx if i not in val_idx])
 
     df['split'] = 'train'
     df.loc[val_idx, 'split'] = 'val'

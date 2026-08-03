@@ -64,9 +64,8 @@ def build_iva_augmentation_pipeline(is_train: bool = True) -> A.Compose:
         ], p=0.5),
         A.ColorJitter(brightness=0.25, contrast=0.25, saturation=0.20, hue=0.05, p=0.5), # Hue bridé à 0.05
         A.OneOf([
-            A.GaussNoise(var_limit=(10.0, 40.0), p=0.5),
+            A.GaussNoise(std_range=(0.1, 0.3), p=0.5),
             A.ISONoise(color_shift=(0.01, 0.05), intensity=(0.1, 0.4), p=0.5),
         ], p=0.4),
-        A.Vignette(vignette_fade_limit=0.25, p=0.3),
         A.Normalize(mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225)),
     ])
