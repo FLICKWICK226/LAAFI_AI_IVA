@@ -1,8 +1,58 @@
 import os
+import zipfile
 import pandas as pd
 import numpy as np
 from tqdm import tqdm
 from sklearn.model_selection import StratifiedGroupKFold
+
+def extract_archives_if_needed(target_dir: str) -> None:
+    """
+    Extrait automatiquement les archives .zip ou .7z si aucune image non compressée n'est présente.
+    """
+    try:
+        import py7zr
+    except ImportError:
+        os.system("pip install -q py7zr")
+        import py7zr
+
+    for root, _, files in os.walk(target_dir, followlinks=True):
+        for file in files:
+            full_path = os.path.join(root, file)
+            if file.endswith('.zip'):
+                print(f"📦 Extraction de l'archive ZIP : {file}...")
+                with zipfile.ZipFile(full_path, 'r') as zip_ref:
+                    zip_ref.extractall(target_dir)
+            elif file.endswith('.7z'):
+                print(f"📦 Extraction de l'archive 7Z : {file}...")
+                try:
+                    with py7zr.SevenZipFile(full_path, mode='r') as z:
+                        z.extractall(path=target_dir)
+                except Exception as e:
+                    print(f"⚠️ Impossible d'extraire {file} : {e}")
+
+def get_class_label(path: str) -> str:
+    """
+    Détermine la classe ('Type_1', 'Type_2', 'Type_3') à partir du chemin complet de l'image.
+    """
+    norm_path = path.replace("\\", "/")
+    parts = norm_path.split("/")
+    
+    # 1. Vérification exacte du nom du dossier parent
+    for p in reversed(parts[:-1]):
+        if p in ['Type_1', 'Type_2', 'Type_3']:
+            return p
+            
+    # 2. Vérification insensible à la casse
+    for p in reversed(parts[:-1]):
+        p_lower = p.lower()
+        if 'type_1' in p_lower:
+            return 'Type_1'
+        elif 'type_2' in p_lower:
+            return 'Type_2'
+        elif 'type_3' in p_lower:
+            return 'Type_3'
+            
+    return None
 
 def generate_patient_clusters_and_splits(
     data_raw_dir: str = "./data/raw",
@@ -21,24 +71,38 @@ def generate_patient_clusters_and_splits(
 
     os.makedirs(output_dir, exist_ok=True)
     
+    print(f"🔍 Indexation et recherche des images depuis (followlinks=True) : {data_raw_dir}...")
+    
     image_paths = []
     labels = []
-    
-    print(f"🔍 Indexation et recherche des images depuis : {data_raw_dir}...")
     all_files = []
-    for root, _, files in os.walk(data_raw_dir):
+    
+    for root, _, files in os.walk(data_raw_dir, followlinks=True):
         for f in files:
             if f.lower().endswith(('.jpg', '.jpeg', '.png')):
                 all_files.append(os.path.join(root, f))
 
-    for full_path in tqdm(all_files, desc="Indexation des images"):
-        parent_dir = os.path.basename(os.path.dirname(full_path))
-        if parent_dir in ['Type_1', 'Type_2', 'Type_3']:
+    # Si aucune image brute n'est trouvée, chercher et extraire les archives .zip / .7z sous /kaggle/working/
+    if len(all_files) == 0 and os.path.exists("/kaggle/working"):
+        print("⚠️ Aucune image décompressée trouvée. Tentative d'extraction des archives .zip/.7z...")
+        extracted_dir = "/kaggle/working/data/extracted_raw"
+        os.makedirs(extracted_dir, exist_ok=True)
+        extract_archives_if_needed(data_raw_dir)
+        
+        all_files = []
+        for root, _, files in os.walk(data_raw_dir, followlinks=True):
+            for f in files:
+                if f.lower().endswith(('.jpg', '.jpeg', '.png')):
+                    all_files.append(os.path.join(root, f))
+
+    for full_path in tqdm(all_files, desc="Parsing des étiquettes d'images"):
+        cls_label = get_class_label(full_path)
+        if cls_label is not None:
             image_paths.append(full_path)
-            labels.append(parent_dir)
+            labels.append(cls_label)
 
     if len(image_paths) == 0:
-        print(f"⚠️ Aucune image trouvée dans {data_raw_dir}. Création de fichiers CSV de structure.")
+        print(f"⚠️ Aucune image trouvée dans {data_raw_dir}. Fichiers CSV de structure créés.")
         df_dummy = pd.DataFrame(columns=['filepath', 'label', 'patient_id', 'split'])
         df_dummy.to_csv(os.path.join(output_dir, 'train.csv'), index=False)
         df_dummy.to_csv(os.path.join(output_dir, 'val.csv'), index=False)
