@@ -173,7 +173,7 @@ LAAFI_AI_IVA/
 └── setup.py                      # Package installation (pip install -e .)
 ```
 
-## 7. Script de Téléchargement Idempotent
+## 7. Script de Téléchargement Idempotent & Flexible
 
 Python
 
@@ -181,9 +181,10 @@ Python
 # src/data/downloader.py
 
 import os
+import sys
 
 def download_intel_mobileodt_dataset(target_data_path="./data/raw"):
-    """Télécharge le dataset Kaggle 'intel-mobileodt-cervical-cancer-screening' si non présent."""
+    """Télécharge le dataset Kaggle 'intel-mobileodt-cervical-cancer-screening' de façon flexible."""
     os.makedirs(target_data_path, exist_ok=True)
     
     train_dir = os.path.join(target_data_path, "train")
@@ -191,10 +192,13 @@ def download_intel_mobileodt_dataset(target_data_path="./data/raw"):
         print(f"✅ Dataset déjà présent dans : {target_data_path}")
         return
 
-    print("📥 Initialisation du téléchargement depuis Kaggle...")
-    assert "KAGGLE_USERNAME" in os.environ, "Erreur: Variable KAGGLE_USERNAME manquante."
-    assert "KAGGLE_KEY" in os.environ, "Erreur: Variable KAGGLE_KEY manquante."
-    
+    print("📥 Initialisation de l'accès aux données Kaggle (API Key / Token / kaggle.json)...")
+    if "google.colab" in sys.modules:
+        from google.colab import userdata
+        for key in ["KAGGLE_API_KEY", "KAGGLE_TOKEN", "KAGGLE_KEY", "KAGGLE_USERNAME"]:
+            if userdata.get(key):
+                os.environ[key] = userdata.get(key)
+
     import kaggle
     dataset_name = "intel-mobileodt-cervical-cancer-screening"
     kaggle.api.dataset_download_files(dataset_name, path=target_data_path, unzip=True)
