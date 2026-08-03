@@ -8,6 +8,9 @@ import torch.nn as nn
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
+# Anti-fragmentation mémoire VRAM CUDA
+os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
+
 from src.utils.seed import seed_everything
 from src.data.dataset import IVADataset
 from src.models.classifier_lesion import IVALesionClassifierStage2
@@ -16,7 +19,7 @@ from src.utils.metrics import FocalLoss, calculate_clinical_metrics
 def train_laafi_ai_model(config_path: str = "./config/config.yaml") -> None:
     """
     Moteur d'entraînement principal pour Stage 2 (CADx) ultra-optimisé pour GPU Google Colab T4.
-    Intègre les Levis de performance 1 (Early Stopping), 2 (torch.compile) et 5 (Warmup Backbone Freeze).
+    Résout définitivement les erreurs CUDA Out of Memory en utilisant batch_size=8 + Gradient Accumulation.
     """
     with open(config_path, "r", encoding="utf-8") as f:
         cfg = yaml.safe_load(f)
@@ -24,6 +27,9 @@ def train_laafi_ai_model(config_path: str = "./config/config.yaml") -> None:
     seed_everything(cfg['project']['seed'])
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"🖥️ Exécution de l'entraînement sur : {device}")
+
+    if device.type == 'cuda':
+        torch.cuda.empty_cache()
 
     # Mirroring SSD Local Colab (/content/data_fast) AVANT instanciation des Datasets
     if 'google.colab' in sys.modules or os.path.exists("/content/drive/MyDrive/LAAFI_AI_IVA/data"):
@@ -52,9 +58,12 @@ def train_laafi_ai_model(config_path: str = "./config/config.yaml") -> None:
         is_train=False
     )
 
+    batch_size = cfg['stage2_classifier']['batch_size']
+    accum_steps = cfg['stage2_classifier'].get('gradient_accumulation_steps', 2)
+
     train_loader = DataLoader(
         train_dataset,
-        batch_size=cfg['stage2_classifier']['batch_size'],
+        batch_size=batch_size,
         shuffle=True,
         num_workers=num_workers,
         pin_memory=pin_memory,
@@ -62,7 +71,7 @@ def train_laafi_ai_model(config_path: str = "./config/config.yaml") -> None:
     )
     val_loader = DataLoader(
         val_dataset,
-        batch_size=cfg['stage2_classifier']['batch_size'],
+        batch_size=batch_size,
         shuffle=False,
         num_workers=num_workers,
         pin_memory=pin_memory,
@@ -77,12 +86,12 @@ def train_laafi_ai_model(config_path: str = "./config/config.yaml") -> None:
         num_classes_pathology=2
     ).to(device)
 
-    # ⚡ LEVIER 2 : Compilateur PyTorch 2.0 (Kernel Fusion) si supporté
+    # Compilateur PyTorch 2.0 (Kernel Fusion) si supporté
     model = raw_model
     if hasattr(torch, "compile") and device.type == "cuda":
         try:
             model = torch.compile(raw_model)
-            print("⚡ LEVIER 2 APPLIQUÉ : Modèle compilé via torch.compile() pour fusion de kernels CUDA.")
+            print("⚡ LEVIER 2 APPLIQUÉ : Modèle compilé via torch.compile().")
         except Exception as e_comp:
             print(f"⚠️ Remarque torch.compile non appliqué : {e_comp}")
 
@@ -104,12 +113,12 @@ def train_laafi_ai_model(config_path: str = "./config/config.yaml") -> None:
         T_max=cfg['stage2_classifier']['epochs']
     )
     
+    # Modern PyTorch 2.6 GradScaler
     scaler = torch.amp.GradScaler('cuda', enabled=(device.type == 'cuda'))
     best_val_auc = 0.0
     start_epoch = 1
     no_improve_epochs = 0
 
-    # Paramètres des leviers 1 et 5
     warmup_epochs = cfg['stage2_classifier'].get('warmup_epochs', 3)
     patience = cfg['stage2_classifier'].get('early_stopping_patience', 5)
 
@@ -129,46 +138,49 @@ def train_laafi_ai_model(config_path: str = "./config/config.yaml") -> None:
             no_improve_epochs = checkpoint.get('no_improve_epochs', 0)
             print(f"✅ Reprise réussie à l'epoch {start_epoch} (Meilleur Val AUC : {best_val_auc:.4f})")
         except Exception as e_res:
-            print(f"⚠️ Impossible de charger le checkpoint ({e_res}). Démarrage à zéro.")
+            print(f"⚠️ Checkpoint incompatible ou corrompu ({e_res}). Démarrage d'un nouvel entraînement.")
 
     if start_epoch > cfg['stage2_classifier']['epochs']:
         print(f"🎉 Entraînement déjà achevé ({cfg['stage2_classifier']['epochs']} epochs).")
         return
 
-    print(f"🚀 Début de l'entraînement optimisé (Epoch {start_epoch} à {cfg['stage2_classifier']['epochs']})...")
+    print(f"🚀 Début de l'entraînement optimisé VRAM (Batch Size: {batch_size}, Accumulation: {accum_steps}, Batch Effectif: {batch_size * accum_steps})...")
     for epoch in range(start_epoch, cfg['stage2_classifier']['epochs'] + 1):
         
-        # 🔒 LEVIER 5 : Gel du backbone pendant les 'warmup_epochs' (Warmup Transfer Learning)
+        # LEVIER 5 : Gel du backbone pendant warmup_epochs
         if epoch <= warmup_epochs:
-            print(f"🔒 LEVIER 5 : Epoch {epoch}/{warmup_epochs} - Backbone gelé (Seules les têtes sont entraînées).")
+            print(f"🔒 LEVIER 5 : Epoch {epoch}/{warmup_epochs} - Backbone gelé (Warmup).")
             for param in raw_model.backbone.parameters():
                 param.requires_grad = False
         else:
             if epoch == warmup_epochs + 1:
-                print(f"🔓 LEVIER 5 : Phase de warmup terminée ! Déblocage intégral des poids du backbone pour le Fine-Tuning.")
+                print("🔓 LEVIER 5 : Phase de warmup terminée ! Déblocage des poids du backbone pour le Fine-Tuning.")
             for param in raw_model.backbone.parameters():
                 param.requires_grad = True
 
         model.train()
         train_loss = 0.0
-        
-        for images, targets, _ in tqdm(train_loader, desc=f"Epoch {epoch}/{cfg['stage2_classifier']['epochs']}"):
+        optimizer.zero_grad()
+
+        for step, (images, targets, _) in enumerate(tqdm(train_loader, desc=f"Epoch {epoch}/{cfg['stage2_classifier']['epochs']}")):
             images = images.to(device, non_blocking=True)
             targets = targets.to(device, non_blocking=True)
-            optimizer.zero_grad()
 
             with torch.amp.autocast('cuda', enabled=(device.type == 'cuda')):
                 outputs = model(images)
                 loss_elig = criterion_eligibility(outputs['eligibility'], targets)
                 targets_patho = (targets > 0).long()
                 loss_patho = criterion_pathology(outputs['pathology'], targets_patho)
-                total_loss = loss_elig + 2.0 * loss_patho
+                total_loss = (loss_elig + 2.0 * loss_patho) / accum_steps
 
             scaler.scale(total_loss).backward()
-            scaler.step(optimizer)
-            scaler.update()
 
-            train_loss += total_loss.item()
+            if (step + 1) % accum_steps == 0 or (step + 1) == len(train_loader):
+                scaler.step(optimizer)
+                scaler.update()
+                optimizer.zero_grad()
+
+            train_loss += total_loss.item() * accum_steps
 
         scheduler.step()
         train_loss /= len(train_loader) if len(train_loader) > 0 else 1
@@ -244,7 +256,7 @@ def train_laafi_ai_model(config_path: str = "./config/config.yaml") -> None:
         with open(json_report_path, 'w', encoding='utf-8') as f_json:
             json.dump(history, f_json, indent=4)
 
-        # 🎯 LEVIER 1 : Logique d'Early Stopping & Sauvegarde des checkpoints
+        # LEVIER 1 : Early Stopping & Checkpoints
         if best_metrics['auc_roc'] > best_val_auc:
             best_val_auc = best_metrics['auc_roc']
             no_improve_epochs = 0
@@ -260,7 +272,6 @@ def train_laafi_ai_model(config_path: str = "./config/config.yaml") -> None:
             no_improve_epochs += 1
             print(f"⏳ AUC non amélioré depuis {no_improve_epochs}/{patience} epoch(s).")
 
-        # Checkpoint de sécurité de l'état d'entraînement
         latest_dict = {
             'epoch': epoch,
             'model_state_dict': raw_model.state_dict(),
@@ -273,10 +284,9 @@ def train_laafi_ai_model(config_path: str = "./config/config.yaml") -> None:
         }
         torch.save(latest_dict, latest_checkpoint_path)
 
-        # Déclenchement de l'Early Stopping (Levier 1)
         if no_improve_epochs >= patience:
             print(f"🛑 LEVIER 1 DÉCLENCHÉ : Arrêt précoce à l'epoch {epoch} (Aucune amélioration depuis {patience} epochs).")
-            print(f"🎯 Économie d'unités GPU réalisée ! Meilleur Val AUC obtenu : {best_val_auc:.4f}")
+            print(f"🎯 Meilleur Val AUC obtenu : {best_val_auc:.4f}")
             break
 
     if torch.cuda.is_available():

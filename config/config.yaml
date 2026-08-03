@@ -37,7 +37,8 @@ stage2_classifier:
   backbone: "convnext_base"
   num_classes: 2
   epochs: 30
-  batch_size: 16  # Conservé à 16 pour sécurité VRAM Colab T4
+  batch_size: 8   # Réduit à 8 pour garantir < 8 Go VRAM sur GPU T4 (Evite CUDA OOM)
+  gradient_accumulation_steps: 2  # Batch size effectif = 8 * 2 = 16
   warmup_epochs: 3  # Levier 5 : Backbone gelé pendant 3 epochs
   early_stopping_patience: 5  # Levier 1 : Arrêt précoce si 5 epochs sans amélioration
   learning_rate: 1.0e-4
