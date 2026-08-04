@@ -45,7 +45,10 @@ def export_model_to_onnx(
     
     if resolved_checkpoint:
         try:
-            ckpt = torch.load(resolved_checkpoint, map_location=device)
+            try:
+                ckpt = torch.load(resolved_checkpoint, map_location=device, weights_only=False)
+            except TypeError:
+                ckpt = torch.load(resolved_checkpoint, map_location=device)
             state_dict = ckpt['model_state_dict'] if isinstance(ckpt, dict) and 'model_state_dict' in ckpt else ckpt
             
             # Nettoyage des clés compilées torch.compile() (_orig_mod.)
