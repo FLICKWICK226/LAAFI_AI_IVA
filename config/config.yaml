@@ -47,11 +47,10 @@ stage2_classifier:
   focal_loss_gamma: 2.0
   focal_loss_alpha: 0.75
   threshold_calibration:
-    min_t: 0.25
-    max_t: 0.45
+    min_t: 0.10
+    max_t: 0.90
     step: 0.01
-    target_recall: 0.955
-    optimal_t: 0.38
+    target_recall: 0.95
   tri_class_triage:
     green_max: 0.20   # P < 0.20 -> Vert (Négatif, contrôle 3 ans)
     yellow_max: 0.38  # 0.20 <= P < 0.38 -> Jaune (Incertain, 2nd badigeon / 2e avis)

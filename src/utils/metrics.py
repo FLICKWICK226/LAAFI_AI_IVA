@@ -65,10 +65,11 @@ def calculate_clinical_metrics(y_true: np.ndarray, y_prob: np.ndarray, threshold
         "tp": int(tp), "tn": int(tn), "fp": int(fp), "fn": int(fn)
     }
 
-def evaluate_threshold_grid(y_true: np.ndarray, y_prob: np.ndarray, min_t: float = 0.25, max_t: float = 0.45, step: float = 0.01):
+def evaluate_threshold_grid(y_true: np.ndarray, y_prob: np.ndarray, min_t: float = 0.10, max_t: float = 0.90, step: float = 0.01):
     """
-    Pilier 1 (Action 1.1) : Balayage fin du seuil T dans [0.25, 0.45] par pas de 0.01
-    pour trouver le compromis optimal (Sensibilité >= 95.0% et Spécificité maximale > 80.0%).
+    Pilier 1 (Action 1.1) : Balayage fin du seuil T dans [0.10, 0.90] par pas de 0.01
+    pour trouver le compromis optimal (Sensibilité >= 95.0% et Spécificité maximale >= 80.0%).
+    Évite les angles morts dus au décalage de probabilité de la FocalLoss (alpha=0.75).
     """
     grid_results = []
     best_item = None
@@ -92,6 +93,7 @@ def evaluate_threshold_grid(y_true: np.ndarray, y_prob: np.ndarray, min_t: float
         "grid": grid_results,
         "optimal": best_item
     }
+
 
 def categorize_tri_class(y_prob: np.ndarray, low_t: float = 0.20, high_t: float = 0.38) -> np.ndarray:
     """
