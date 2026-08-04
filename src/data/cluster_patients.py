@@ -37,22 +37,45 @@ def get_class_label(path: str) -> str:
     norm_path = path.replace("\\", "/")
     parts = norm_path.split("/")
     
-    # 1. Vérification exacte du nom du dossier parent
+    # 1. Vérification exacte du nom du dossier parent ou d'un segment
     for p in reversed(parts[:-1]):
         if p in ['Type_1', 'Type_2', 'Type_3']:
             return p
             
-    # 2. Vérification insensible à la casse
+    # 2. Vérification insensible à la casse et sous-chaînes (ex: additional_Type_1_v2)
     for p in reversed(parts[:-1]):
         p_lower = p.lower()
-        if 'type_1' in p_lower:
+        if 'type_1' in p_lower or 'type1' in p_lower:
             return 'Type_1'
-        elif 'type_2' in p_lower:
+        elif 'type_2' in p_lower or 'type2' in p_lower:
             return 'Type_2'
-        elif 'type_3' in p_lower:
+        elif 'type_3' in p_lower or 'type3' in p_lower:
             return 'Type_3'
             
     return None
+
+def resolve_raw_data_dir(data_raw_dir: str) -> str:
+    """
+    Résoluteur universel multi-chemins pour localiser le jeu de données d'entrée.
+    """
+    candidates = [
+        data_raw_dir,
+        "/kaggle/input/competitions/intel-mobileodt-cervical-cancer-screening",
+        "/kaggle/input/intel-mobileodt-cervical-cancer-screening",
+        "/kaggle/input"
+    ]
+    for cand in candidates:
+        if os.path.exists(cand):
+            # Vérifier si des fichiers images existent sous ce répertoire
+            for root, _, files in os.walk(cand, followlinks=True):
+                if any(f.lower().endswith(('.jpg', '.jpeg', '.png')) for f in files):
+                    print(f"⚡ Repertoire de donnees valide localise dans : {cand}")
+                    return cand
+                    
+    if os.path.exists("/kaggle/input"):
+        return "/kaggle/input"
+        
+    return data_raw_dir
 
 def generate_patient_clusters_and_splits(
     data_raw_dir: str = "./data/raw",
@@ -62,35 +85,34 @@ def generate_patient_clusters_and_splits(
     """
     Génère les splits patient train.csv, val.csv, test.csv sous data/processed/ ou /kaggle/working/.
     """
-    # Auto-détection de l'environnement Kaggle / Colab
-    if os.path.exists("/kaggle/input/intel-mobileodt-cervical-cancer-screening"):
-        data_raw_dir = "/kaggle/input/intel-mobileodt-cervical-cancer-screening"
+    resolved_raw_dir = resolve_raw_data_dir(data_raw_dir)
+    
+    # Auto-détection du dossier de sortie sous Kaggle / Colab
+    if os.path.exists("/kaggle/working"):
         output_dir = "/kaggle/working/data/processed"
     elif os.path.exists("/content/data_fast"):
         output_dir = "./data/processed"
 
     os.makedirs(output_dir, exist_ok=True)
     
-    print(f"🔍 Indexation et recherche des images depuis (followlinks=True) : {data_raw_dir}...")
+    print(f"🔍 Indexation et recherche des images depuis : {resolved_raw_dir}...")
     
     image_paths = []
     labels = []
     all_files = []
     
-    for root, _, files in os.walk(data_raw_dir, followlinks=True):
+    for root, _, files in os.walk(resolved_raw_dir, followlinks=True):
         for f in files:
             if f.lower().endswith(('.jpg', '.jpeg', '.png')):
                 all_files.append(os.path.join(root, f))
 
-    # Si aucune image brute n'est trouvée, chercher et extraire les archives .zip / .7z sous /kaggle/working/
+    # Si aucune image brute n'est trouvée, chercher et extraire les archives .zip / .7z
     if len(all_files) == 0 and os.path.exists("/kaggle/working"):
         print("⚠️ Aucune image décompressée trouvée. Tentative d'extraction des archives .zip/.7z...")
-        extracted_dir = "/kaggle/working/data/extracted_raw"
-        os.makedirs(extracted_dir, exist_ok=True)
-        extract_archives_if_needed(data_raw_dir)
+        extract_archives_if_needed(resolved_raw_dir)
         
         all_files = []
-        for root, _, files in os.walk(data_raw_dir, followlinks=True):
+        for root, _, files in os.walk(resolved_raw_dir, followlinks=True):
             for f in files:
                 if f.lower().endswith(('.jpg', '.jpeg', '.png')):
                     all_files.append(os.path.join(root, f))
@@ -102,7 +124,7 @@ def generate_patient_clusters_and_splits(
             labels.append(cls_label)
 
     if len(image_paths) == 0:
-        print(f"⚠️ Aucune image trouvée dans {data_raw_dir}. Fichiers CSV de structure créés.")
+        print(f"⚠️ Aucune image trouvée dans {resolved_raw_dir}. Fichiers CSV de structure créés.")
         df_dummy = pd.DataFrame(columns=['filepath', 'label', 'patient_id', 'split'])
         df_dummy.to_csv(os.path.join(output_dir, 'train.csv'), index=False)
         df_dummy.to_csv(os.path.join(output_dir, 'val.csv'), index=False)
@@ -140,8 +162,8 @@ def generate_patient_clusters_and_splits(
     val_df.to_csv(os.path.join(output_dir, 'val.csv'), index=False)
     test_df.to_csv(os.path.join(output_dir, 'test.csv'), index=False)
 
-    print(f"✅ Patient-Level Splits générés dans : {output_dir}")
-    print(f"📊 Train: {len(train_df)} | Val: {len(val_df)} | Test: {len(test_df)}")
+    print(f"✅ Patient-Level Splits générés avec succès dans : {output_dir}")
+    print(f"📊 Total images indexées : {len(df)} (Train: {len(train_df)} | Val: {len(val_df)} | Test: {len(test_df)})")
 
 if __name__ == "__main__":
     generate_patient_clusters_and_splits()
