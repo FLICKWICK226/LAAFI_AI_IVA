@@ -80,9 +80,6 @@ def build_iva_augmentation_pipeline(is_train: bool = True, specular_proba: float
         ], p=0.5),
         A.RandomSunFlare(
             flare_roi=(0.1, 0.1, 0.9, 0.9),
-            angle_lower=0,
-            angle_upper=1,
-            src_radius=80,
             p=specular_proba
         ),
         A.ColorJitter(brightness=0.25, contrast=0.25, saturation=0.20, hue=0.05, p=0.5),
