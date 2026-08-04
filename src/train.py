@@ -82,7 +82,7 @@ def train_laafi_ai_model(config_path: str = "./config/config.yaml") -> None:
         torch.cuda.empty_cache()
 
     print("\n" + "="*70)
-    print("🚀 STEP [2/6] : Synchronisation des données vers le SSD Local Colab (/content/data_fast)...")
+    print("🚀 STEP [2/6] : Synchronisation et résolution des chemins de données...")
     print("="*70)
 
     if 'google.colab' in sys.modules or os.path.exists("/content/drive/MyDrive/LAAFI_AI_IVA/data"):
@@ -90,24 +90,52 @@ def train_laafi_ai_model(config_path: str = "./config/config.yaml") -> None:
         fast_data_dir = "/content/data_fast"
         fast_sync_to_ssd(drive_data_dir, fast_data_dir)
 
+    # Détection et résolution dynamique des dossiers Kaggle / Colab
+    processed_dir = cfg['paths']['processed_data_dir']
+    masks_dir = cfg['paths']['synthetic_masks_dir']
+    checkpoints_dir = cfg['paths']['checkpoints_dir']
+    logs_dir = cfg['paths']['logs_dir']
+    reports_dir = cfg['paths']['reports_dir']
+    figures_dir = cfg['paths']['figures_dir']
+
+    if os.path.exists("/kaggle/working"):
+        if os.path.exists("/kaggle/working/data/processed/train.csv"):
+            processed_dir = "/kaggle/working/data/processed"
+        elif not os.path.exists(os.path.join(processed_dir, "train.csv")) and os.path.exists("../data/processed/train.csv"):
+            processed_dir = "../data/processed"
+            
+        if os.path.exists("/kaggle/working/data/synthetic_masks"):
+            masks_dir = "/kaggle/working/data/synthetic_masks"
+            
+        checkpoints_dir = "/kaggle/working/models/checkpoints"
+        logs_dir = "/kaggle/working/outputs/logs"
+        reports_dir = "/kaggle/working/outputs/reports"
+        figures_dir = "/kaggle/working/outputs/figures"
+
     num_workers = min(2, os.cpu_count() or 2) if device.type == 'cuda' else 0
     pin_memory = True if device.type == 'cuda' else False
 
-    os.makedirs(cfg['paths']['checkpoints_dir'], exist_ok=True)
-    os.makedirs(cfg['paths']['logs_dir'], exist_ok=True)
+    os.makedirs(checkpoints_dir, exist_ok=True)
+    os.makedirs(logs_dir, exist_ok=True)
 
     print("\n" + "="*70)
     print("🚀 STEP [3/6] : Chargement des Datasets PyTorch (Train & Val)...")
     print("="*70)
 
+    train_csv_path = os.path.join(processed_dir, "train.csv")
+    val_csv_path = os.path.join(processed_dir, "val.csv")
+
+    print(f"🔍 Chargement train.csv depuis : {train_csv_path}")
+    print(f"🔍 Chargement val.csv depuis   : {val_csv_path}")
+
     train_dataset = IVADataset(
-        csv_file=os.path.join(cfg['paths']['processed_data_dir'], "train.csv"),
+        csv_file=train_csv_path,
         is_train=True,
-        masks_dir=cfg['paths']['synthetic_masks_dir'],
+        masks_dir=masks_dir,
         perlin_proba=cfg['augmentations']['perlin_noise_proba']
     )
     val_dataset = IVADataset(
-        csv_file=os.path.join(cfg['paths']['processed_data_dir'], "val.csv"),
+        csv_file=val_csv_path,
         is_train=False
     )
 
@@ -132,6 +160,9 @@ def train_laafi_ai_model(config_path: str = "./config/config.yaml") -> None:
     )
 
     print(f"📊 Dataset chargé avec succès : {len(train_dataset)} train, {len(val_dataset)} val.")
+
+    if len(train_dataset) == 0:
+        raise ValueError(f"❌ Le dataset d'entraînement est vide (0 échantillon dans {train_csv_path}). Veuillez ré-exécuter la Cellule 4 (generate_patient_clusters_and_splits).")
 
     print("\n" + "="*70)
     print(f"🚀 STEP [4/6] : Initialisation du Modèle ({cfg['stage2_classifier']['backbone']})...")
@@ -181,7 +212,7 @@ def train_laafi_ai_model(config_path: str = "./config/config.yaml") -> None:
     print("🚀 STEP [5/6] : Vérification du Checkpoint de reprise...")
     print("="*70)
 
-    latest_checkpoint_path = os.path.join(cfg['paths']['checkpoints_dir'], "latest_checkpoint.pt")
+    latest_checkpoint_path = os.path.join(checkpoints_dir, "latest_checkpoint.pt")
     if os.path.exists(latest_checkpoint_path):
         print(f"🔄 Checkpoint de reprise trouvé : {latest_checkpoint_path}")
         try:
@@ -206,7 +237,7 @@ def train_laafi_ai_model(config_path: str = "./config/config.yaml") -> None:
     print(f"🚀 STEP [6/6] : Démarrage de la boucle d'entraînement (Epoch {start_epoch} à {cfg['stage2_classifier']['epochs']})...")
     print("="*70)
 
-    live_status_path = os.path.join(cfg['paths']['logs_dir'], "live_status.json")
+    live_status_path = os.path.join(logs_dir, "live_status.json")
 
     for epoch in range(start_epoch, cfg['stage2_classifier']['epochs'] + 1):
         
@@ -297,8 +328,6 @@ def train_laafi_ai_model(config_path: str = "./config/config.yaml") -> None:
         print(f"📊 Epoch {epoch} Terminée | Loss: {train_loss:.4f} | Val AUC: {best_metrics['auc_roc']:.4f} | Sensibilité: {best_metrics['sensitivity']*100:.1f}% | Score F2: {best_metrics.get('f2_score', 0):.4f} (Seuil: {best_threshold:.2f})")
 
         # Mise à jour des rapports d'entraînement
-        reports_dir = cfg['paths']['reports_dir']
-        figures_dir = cfg['paths']['figures_dir']
         os.makedirs(reports_dir, exist_ok=True)
         os.makedirs(figures_dir, exist_ok=True)
 
@@ -335,7 +364,7 @@ def train_laafi_ai_model(config_path: str = "./config/config.yaml") -> None:
         if best_metrics['auc_roc'] > best_val_auc:
             best_val_auc = best_metrics['auc_roc']
             no_improve_epochs = 0
-            best_path = os.path.join(cfg['paths']['checkpoints_dir'], "best_model.pt")
+            best_path = os.path.join(checkpoints_dir, "best_model.pt")
             torch.save({
                 'epoch': epoch,
                 'model_state_dict': raw_model.state_dict(),

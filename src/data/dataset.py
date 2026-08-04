@@ -9,7 +9,7 @@ from src.data.augmentations import FastPerlinNoiseLoader, build_iva_augmentation
 class IVADataset(Dataset):
     """
     Dataset PyTorch hautement optimisé pour l'imagerie IVA du col de l'utérus.
-    Résout automatiquement les chemins Google Drive FUSE vers le SSD local rapide.
+    Résout automatiquement les chemins Google Drive FUSE et Kaggle vers le SSD local rapide.
     """
     def __init__(
         self,
@@ -21,7 +21,15 @@ class IVADataset(Dataset):
         self.is_train = is_train
         self.perlin_proba = perlin_proba
         
-        # Redirection automatique vers SSD local Colab si présent
+        # Redirection automatique vers SSD local Colab / Kaggle si présent
+        if os.path.exists("/kaggle/working/data/processed"):
+            csv_file_kaggle = os.path.join("/kaggle/working/data/processed", os.path.basename(csv_file))
+            if os.path.exists(csv_file_kaggle):
+                csv_file = csv_file_kaggle
+
+        if os.path.exists("/kaggle/working/data/synthetic_masks"):
+            masks_dir = "/kaggle/working/data/synthetic_masks"
+
         if os.path.exists("/content/data_fast/processed"):
             csv_file_fast = csv_file.replace("./data", "/content/data_fast").replace("/content/drive/MyDrive/LAAFI_AI_IVA/data", "/content/data_fast")
             if os.path.exists(csv_file_fast):
@@ -49,7 +57,7 @@ class IVADataset(Dataset):
         else:
             self.df['target'] = 0
 
-        # Remplacement dynamique des chemins d'accès vers le SSD local /content/data_fast
+        # Remplacement dynamique des chemins d'accès vers le SSD local /content/data_fast si présent
         if os.path.exists("/content/data_fast"):
             self.df['filepath'] = self.df['filepath'].apply(
                 lambda p: str(p).replace("/content/drive/MyDrive/LAAFI_AI_IVA/data", "/content/data_fast")
