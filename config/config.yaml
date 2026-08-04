@@ -40,16 +40,22 @@ stage2_classifier:
   batch_size: 8   # Réduit à 8 pour garantir < 8 Go VRAM sur GPU T4 (Evite CUDA OOM)
   gradient_accumulation_steps: 2  # Batch size effectif = 8 * 2 = 16
   warmup_epochs: 3  # Levier 5 : Backbone gelé pendant 3 epochs
-  early_stopping_patience: 5  # Levier 1 : Arrêt précoce si 5 epochs sans amélioration
+  early_stopping_patience: 4  # Early stopping déclenché si 4 epochs sans amélioration (Epoch 25 optimal)
   learning_rate: 1.0e-4
-  weight_decay: 1.0e-2
+  weight_decay: 1.0e-3  # Régularisation AdamW renforcée (1e-3)
+  drop_rate: 0.4  # Dropout augmenté à 0.4 pour contrer le surapprentissage
   focal_loss_gamma: 2.0
   focal_loss_alpha: 0.75
   threshold_calibration:
-    min_t: 0.10
-    max_t: 0.40
+    min_t: 0.25
+    max_t: 0.45
     step: 0.01
-    target_recall: 0.95
+    target_recall: 0.955
+    optimal_t: 0.38
+  tri_class_triage:
+    green_max: 0.20   # P < 0.20 -> Vert (Négatif, contrôle 3 ans)
+    yellow_max: 0.38  # 0.20 <= P < 0.38 -> Jaune (Incertain, 2nd badigeon / 2e avis)
+    red_min: 0.38     # P >= 0.38 -> Rouge (Positif, référer / traitement)
 
 augmentations:
   hue_shift_limit: 0.05
@@ -58,3 +64,5 @@ augmentations:
   defocus_radius: [1, 4]
   motion_blur_limit: [3, 9]
   perlin_noise_proba: 0.30
+  specular_flare_proba: 0.40  # Simulation des reflets spéculaires intenses de flash LED
+

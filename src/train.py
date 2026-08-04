@@ -22,7 +22,7 @@ importlib.reload(src.data.dataset)
 
 from src.data.dataset import IVADataset
 from src.models.classifier_lesion import IVALesionClassifierStage2
-from src.utils.metrics import FocalLoss, calculate_clinical_metrics
+from src.utils.metrics import FocalLoss, calculate_clinical_metrics, evaluate_threshold_grid
 
 def fast_sync_to_ssd(src_dir: str, dst_dir: str) -> None:
     """
@@ -172,7 +172,8 @@ def train_laafi_ai_model(config_path: str = "./config/config.yaml") -> None:
         backbone_name=cfg['stage2_classifier']['backbone'],
         pretrained=True,
         num_classes_eligibility=3,
-        num_classes_pathology=2
+        num_classes_pathology=2,
+        drop_rate=float(cfg['stage2_classifier'].get('drop_rate', 0.4))
     ).to(device)
 
     model = raw_model
@@ -309,23 +310,22 @@ def train_laafi_ai_model(config_path: str = "./config/config.yaml") -> None:
         val_targets = np.array(val_targets)
         val_probs = np.array(val_probs)
         
-        best_threshold = 0.5
-        best_metrics = {"auc_roc": 0.5, "sensitivity": 0.0, "f2_score": 0.0}
+        best_threshold = 0.38
+        best_metrics = {"auc_roc": 0.5, "sensitivity": 0.0, "specificity": 0.0, "f2_score": 0.0}
         
         if len(val_targets) > 0 and len(np.unique(val_targets)) > 1:
-            for thresh in np.arange(0.1, 0.9, 0.05):
-                m = calculate_clinical_metrics(val_targets, val_probs, threshold=thresh)
-                if m['sensitivity'] >= 0.95 and m['f2_score'] > best_metrics['f2_score']:
-                    best_metrics = m
-                    best_threshold = thresh
-            if best_metrics['sensitivity'] == 0.0:
-                for thresh in np.arange(0.1, 0.9, 0.05):
-                    m = calculate_clinical_metrics(val_targets, val_probs, threshold=thresh)
-                    if m['f2_score'] > best_metrics['f2_score']:
-                        best_metrics = m
-                        best_threshold = thresh
+            t_cfg = cfg['stage2_classifier'].get('threshold_calibration', {})
+            min_t = t_cfg.get('min_t', 0.25)
+            max_t = t_cfg.get('max_t', 0.45)
+            step_t = t_cfg.get('step', 0.01)
+            
+            grid_res = evaluate_threshold_grid(val_targets, val_probs, min_t=min_t, max_t=max_t, step=step_t)
+            if grid_res['optimal']:
+                best_metrics = grid_res['optimal']
+                best_threshold = best_metrics['threshold']
 
-        print(f"📊 Epoch {epoch} Terminée | Loss: {train_loss:.4f} | Val AUC: {best_metrics['auc_roc']:.4f} | Sensibilité: {best_metrics['sensitivity']*100:.1f}% | Score F2: {best_metrics.get('f2_score', 0):.4f} (Seuil: {best_threshold:.2f})")
+        print(f"📊 Epoch {epoch} Terminée | Loss: {train_loss:.4f} | Val AUC: {best_metrics['auc_roc']:.4f} | Sensibilité: {best_metrics['sensitivity']*100:.1f}% | Spécificité: {best_metrics.get('specificity', 0)*100:.1f}% | Score F2: {best_metrics.get('f2_score', 0):.4f} (Seuil Optimal T: {best_threshold:.2f})")
+
 
         # Mise à jour des rapports d'entraînement
         os.makedirs(reports_dir, exist_ok=True)
