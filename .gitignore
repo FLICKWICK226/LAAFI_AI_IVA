@@ -82,5 +82,4 @@ tmp_*.json
 usefuls*.md
 kaggle_runner/
 kaggle/
-LAAFI_AI_IVA_Kaggle_Master_Pipeline.ipynb
 create_valid_notebook.py
