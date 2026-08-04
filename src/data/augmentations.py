@@ -80,9 +80,8 @@ def build_iva_augmentation_pipeline(is_train: bool = True, specular_proba: float
         ], p=0.5),
         A.RandomSunFlare(
             flare_roi=(0.1, 0.1, 0.9, 0.9),
-            angle_range=(0, 1),
-            num_flare_circles_lower=1,
-            num_flare_circles_upper=4,
+            angle_lower=0,
+            angle_upper=1,
             src_radius=80,
             p=specular_proba
         ),
