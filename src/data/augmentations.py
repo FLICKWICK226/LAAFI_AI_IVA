@@ -2,6 +2,7 @@ import os
 import cv2
 import numpy as np
 import albumentations as A
+from src.preprocessing.cervix_transforms import SpecularReflectionMasker
 
 class FastPerlinNoiseLoader:
     """
