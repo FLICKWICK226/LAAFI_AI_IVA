@@ -3,7 +3,6 @@ import sys
 import importlib
 import yaml
 import numpy as np
-import pandas as pd
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
@@ -30,6 +29,14 @@ from src.models.classifier_lesion import IVALesionClassifierStage2
 from src.utils.metrics import FocalLoss, calculate_clinical_metrics, evaluate_threshold_grid
 from src.losses.asymmetric_loss import AsymmetricFocalLoss
 
+
+def _get_ablation_ckpt_path(loss_type: str) -> str:
+    """Retourne le chemin de checkpoint de reprise selon l'environnement."""
+    base = "/kaggle/working/models/checkpoints" if os.path.exists("/kaggle/working") else "./models/checkpoints"
+    os.makedirs(base, exist_ok=True)
+    return os.path.join(base, f"ablation_{loss_type}_resume.pt")
+
+
 def run_ablation_experiment(
     loss_type: str = "asymmetric",  # "focal" ou "asymmetric"
     epochs: int = 15,
@@ -38,6 +45,7 @@ def run_ablation_experiment(
     """
     Script d'ablation comparant la Focal Loss classique (alpha=0.75) avec l'Asymmetric Loss (ASL).
     Évalue la spécificité obtenue au seuil calibré (Recall >= 95%) sur val.csv et test.csv.
+    Supporte la reprise automatique après déconnexion (checkpoint par époque).
     """
     print(f"\n" + "="*70)
     print(f"🔬 Lancement de l'Ablation avec Loss: '{loss_type.upper()}' (Seed={seed}, Epochs={epochs})")
@@ -74,6 +82,32 @@ def run_ablation_experiment(
         weight_decay=float(cfg['stage2_classifier']['weight_decay'])
     )
 
+    # ── Reprise automatique depuis checkpoint ────────────────────────────────
+    ckpt_path = _get_ablation_ckpt_path(loss_type)
+    start_epoch = 1
+    best_val_auc = 0.0
+    best_threshold = 0.38
+
+    if os.path.exists(ckpt_path):
+        print(f"♻️  Checkpoint de reprise détecté : {ckpt_path}")
+        try:
+            ckpt = torch.load(ckpt_path, map_location=device, weights_only=False)
+            model.load_state_dict(ckpt['model_state_dict'])
+            optimizer.load_state_dict(ckpt['optimizer_state_dict'])
+            start_epoch = ckpt['epoch'] + 1
+            best_val_auc = ckpt.get('best_val_auc', 0.0)
+            best_threshold = ckpt.get('best_threshold', 0.38)
+            print(f"✅ Reprise depuis l'époque {start_epoch} | Meilleur AUC : {best_val_auc:.4f} | Seuil : {best_threshold:.2f}")
+        except Exception as e:
+            print(f"⚠️  Checkpoint corrompu ({e}). Démarrage depuis l'époque 1.")
+            start_epoch = 1
+    else:
+        print("🆕 Aucun checkpoint trouvé — démarrage depuis l'époque 1.")
+
+    if start_epoch > epochs:
+        print(f"🎉 Entraînement déjà terminé ({epochs} époques). Passage direct à l'évaluation Test.")
+    # ────────────────────────────────────────────────────────────────────────
+
     # Chargement des Datasets
     processed_dir = cfg['paths']['processed_data_dir']
     if os.path.exists("/kaggle/working/data/processed"):
@@ -95,11 +129,8 @@ def run_ablation_experiment(
     val_loader = DataLoader(val_ds, batch_size=16, shuffle=False, num_workers=2)
     test_loader = DataLoader(test_ds, batch_size=16, shuffle=False, num_workers=2)
 
-    best_val_auc = 0.0
-    best_threshold = 0.38
-
-    # Boucle d'entraînement
-    for epoch in range(1, epochs + 1):
+    # Boucle d'entraînement avec reprise
+    for epoch in range(start_epoch, epochs + 1):
         model.train()
         running_loss = 0.0
         for images, targets, _ in tqdm(train_loader, desc=f"Époque {epoch}/{epochs} [{loss_type.upper()}]"):
@@ -117,43 +148,61 @@ def run_ablation_experiment(
 
         # Évaluation Validation
         model.eval()
-        val_probs, val_targets = [], []
+        val_probs, val_targets_list = [], []
         with torch.no_grad():
             for images, targets, _ in val_loader:
                 images = images.to(device)
                 outputs = model(images)
                 probs = torch.softmax(outputs['pathology'], dim=1)[:, 1].cpu().numpy()
                 val_probs.extend(probs)
-                val_targets.extend((targets > 0).cpu().numpy())
+                val_targets_list.extend((targets > 0).cpu().numpy())
 
         val_probs = np.array(val_probs)
-        val_targets = np.array(val_targets)
+        val_targets_arr = np.array(val_targets_list)
 
         # Calibration du seuil T sur Validation (Recall >= 95%)
-        grid_eval = evaluate_threshold_grid(val_targets, val_probs)
+        grid_eval = evaluate_threshold_grid(val_targets_arr, val_probs)
         opt_res = grid_eval['optimal']
 
         if opt_res['auc_roc'] > best_val_auc:
             best_val_auc = opt_res['auc_roc']
             best_threshold = opt_res['threshold']
 
-        print(f"Époque {epoch:02d} | Loss: {running_loss/len(train_loader):.4f} | Val AUC: {opt_res['auc_roc']:.4f} | Val Spec (Recall>=95%): {opt_res['specificity']*100:.1f}% | Seuil: {opt_res['threshold']:.2f}")
+        epoch_log = (
+            f"Époque {epoch:02d} | Loss: {running_loss/len(train_loader):.4f} "
+            f"| Val AUC: {opt_res['auc_roc']:.4f} "
+            f"| Val Spec (Recall>=95%): {opt_res['specificity']*100:.1f}% "
+            f"| Seuil: {opt_res['threshold']:.2f}"
+        )
+        print(epoch_log)
+
+        # ── Sauvegarde checkpoint de reprise (écrasement à chaque époque) ────
+        torch.save({
+            'epoch': epoch,
+            'loss_type': loss_type,
+            'model_state_dict': model.state_dict(),
+            'optimizer_state_dict': optimizer.state_dict(),
+            'best_val_auc': best_val_auc,
+            'best_threshold': best_threshold,
+        }, ckpt_path)
+        print(f"💾 Checkpoint sauvegardé → {ckpt_path} (reprise possible depuis l'époque {epoch + 1})")
+        # ────────────────────────────────────────────────────────────────────
 
     # Évaluation finale sur Test Set à aveugle avec le seuil gelé
     model.eval()
-    test_probs, test_targets = [], []
+    test_probs, test_targets_list = [], []
     with torch.no_grad():
         for images, targets, _ in test_loader:
             images = images.to(device)
             outputs = model(images)
             probs = torch.softmax(outputs['pathology'], dim=1)[:, 1].cpu().numpy()
             test_probs.extend(probs)
-            test_targets.extend((targets > 0).cpu().numpy())
+            test_targets_list.extend((targets > 0).cpu().numpy())
 
     test_probs = np.array(test_probs)
-    test_targets = np.array(test_targets)
+    test_targets_arr = np.array(test_targets_list)
 
-    final_metrics = calculate_clinical_metrics(test_targets, test_probs, threshold=best_threshold)
+    final_metrics = calculate_clinical_metrics(test_targets_arr, test_probs, threshold=best_threshold)
     print("\n" + "="*70)
     print(f"📊 RÉSULTATS TEST FINAL ({loss_type.upper()}) | Seuil Gelé T = {best_threshold:.2f}")
     print(f"  • Sensibilité (Recall) : {final_metrics['sensitivity']*100:.1f}%")
@@ -162,7 +211,13 @@ def run_ablation_experiment(
     print(f"  • AUC-ROC              : {final_metrics['auc_roc']:.4f}")
     print("="*70)
 
+    # Nettoyage du checkpoint de reprise après succès
+    if os.path.exists(ckpt_path):
+        os.remove(ckpt_path)
+        print(f"🗑️  Checkpoint de reprise supprimé (run terminé avec succès).")
+
     return final_metrics
+
 
 if __name__ == "__main__":
     run_ablation_experiment(loss_type="asymmetric", epochs=15)
