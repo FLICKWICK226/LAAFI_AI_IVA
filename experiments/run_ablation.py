@@ -50,20 +50,24 @@ def run_ablation_experiment(
     # Instantier le modèle ConvNeXt-Base
     model = IVALesionClassifierStage2(
         backbone_name=cfg['stage2_classifier']['backbone'],
-        num_classes=1,
         pretrained=True,
-        drop_rate=cfg['stage2_classifier']['drop_rate']
+        num_classes_eligibility=3,
+        num_classes_pathology=2,
+        drop_rate=float(cfg['stage2_classifier'].get('drop_rate', 0.4))
     ).to(device)
 
     # Optimizer avec weight decay
     optimizer = torch.optim.AdamW(
         model.parameters(),
-        lr=cfg['stage2_classifier']['learning_rate'],
-        weight_decay=cfg['stage2_classifier']['weight_decay']
+        lr=float(cfg['stage2_classifier']['learning_rate']),
+        weight_decay=float(cfg['stage2_classifier']['weight_decay'])
     )
 
     # Chargement des Datasets
     processed_dir = cfg['paths']['processed_data_dir']
+    if os.path.exists("/kaggle/working/data/processed"):
+        processed_dir = "/kaggle/working/data/processed"
+
     train_csv = os.path.join(processed_dir, "train.csv")
     val_csv = os.path.join(processed_dir, "val.csv")
     test_csv = os.path.join(processed_dir, "test.csv")
@@ -81,7 +85,7 @@ def run_ablation_experiment(
     test_loader = DataLoader(test_ds, batch_size=16, shuffle=False, num_workers=2)
 
     best_val_auc = 0.0
-    best_threshold = 0.50
+    best_threshold = 0.38
 
     # Boucle d'entraînement
     for epoch in range(1, epochs + 1):
@@ -89,11 +93,12 @@ def run_ablation_experiment(
         running_loss = 0.0
         for images, targets in tqdm(train_loader, desc=f"Époque {epoch}/{epochs} [{loss_type.upper()}]"):
             images = images.to(device)
-            targets = targets.to(device)
+            targets_patho = (targets > 0).long().to(device)
 
             optimizer.zero_grad()
-            logits = model(images)
-            loss = criterion(logits, targets)
+            outputs = model(images)
+            logits = outputs['pathology']
+            loss = criterion(logits, targets_patho)
             loss.backward()
             optimizer.step()
 
@@ -105,10 +110,10 @@ def run_ablation_experiment(
         with torch.no_grad():
             for images, targets in val_loader:
                 images = images.to(device)
-                logits = model(images)
-                probs = torch.sigmoid(logits).cpu().numpy().flatten()
+                outputs = model(images)
+                probs = torch.softmax(outputs['pathology'], dim=1)[:, 1].cpu().numpy()
                 val_probs.extend(probs)
-                val_targets.extend(targets.numpy().flatten())
+                val_targets.extend((targets > 0).cpu().numpy())
 
         val_probs = np.array(val_probs)
         val_targets = np.array(val_targets)
@@ -129,10 +134,10 @@ def run_ablation_experiment(
     with torch.no_grad():
         for images, targets in test_loader:
             images = images.to(device)
-            logits = model(images)
-            probs = torch.sigmoid(logits).cpu().numpy().flatten()
+            outputs = model(images)
+            probs = torch.softmax(outputs['pathology'], dim=1)[:, 1].cpu().numpy()
             test_probs.extend(probs)
-            test_targets.extend(targets.numpy().flatten())
+            test_targets.extend((targets > 0).cpu().numpy())
 
     test_probs = np.array(test_probs)
     test_targets = np.array(test_targets)
