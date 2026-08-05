@@ -91,7 +91,7 @@ def run_ablation_experiment(
     for epoch in range(1, epochs + 1):
         model.train()
         running_loss = 0.0
-        for images, targets in tqdm(train_loader, desc=f"Époque {epoch}/{epochs} [{loss_type.upper()}]"):
+        for images, targets, _ in tqdm(train_loader, desc=f"Époque {epoch}/{epochs} [{loss_type.upper()}]"):
             images = images.to(device)
             targets_patho = (targets > 0).long().to(device)
 
@@ -108,7 +108,7 @@ def run_ablation_experiment(
         model.eval()
         val_probs, val_targets = [], []
         with torch.no_grad():
-            for images, targets in val_loader:
+            for images, targets, _ in val_loader:
                 images = images.to(device)
                 outputs = model(images)
                 probs = torch.softmax(outputs['pathology'], dim=1)[:, 1].cpu().numpy()
@@ -132,7 +132,7 @@ def run_ablation_experiment(
     model.eval()
     test_probs, test_targets = [], []
     with torch.no_grad():
-        for images, targets in test_loader:
+        for images, targets, _ in test_loader:
             images = images.to(device)
             outputs = model(images)
             probs = torch.softmax(outputs['pathology'], dim=1)[:, 1].cpu().numpy()
