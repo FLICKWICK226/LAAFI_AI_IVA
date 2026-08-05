@@ -1,5 +1,6 @@
 import os
 import sys
+import importlib
 import yaml
 import numpy as np
 import pandas as pd
@@ -12,6 +13,16 @@ from tqdm import tqdm
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if project_root not in sys.path:
     sys.path.append(project_root)
+
+# Force-reload des modules critiques pour éviter le cache noyau Jupyter/Kaggle
+import src.losses.asymmetric_loss
+import src.utils.metrics
+import src.data.dataset
+import src.models.classifier_lesion
+importlib.reload(src.losses.asymmetric_loss)
+importlib.reload(src.utils.metrics)
+importlib.reload(src.data.dataset)
+importlib.reload(src.models.classifier_lesion)
 
 from src.utils.seed import seed_everything
 from src.data.dataset import IVADataset
