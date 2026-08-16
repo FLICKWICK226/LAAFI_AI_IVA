@@ -52,12 +52,13 @@
 
 | ID | Tâche / Ticket | Priorité | Statut | Description Technique & Critères d'Acceptation |
 | :--- | :--- | :---: | :---: | :--- |
-| **EVAL-01** | **Matrice de Confusion 3x3 Réelle (Type 1 vs 2 vs 3)** | `P1` | 📋 BACKLOG | Évaluation à l'aveugle sur le Test Set avec métriques macro-F1, précision et rappel par classe. |
-| **EVAL-02** | **Aide au Triage & Recommandation Post-Acquisition** | `P1` | 📋 BACKLOG | Sortie produit : Image Rejetée (Reprendre) vs Col Éligible Type 1/2 vs Col Inéligible Type 3 (Référer centre expert). |
+| **EVAL-01** | **Matrice de Confusion 3x3 Réelle (Type 1 vs 2 vs 3)** | `P1` | ✅ DONE | Évaluation à l'aveugle sur le Test Set avec métriques macro-F1, précision et rappel par classe. |
+| **EVAL-02** | **Aide au Triage & Recommandation Post-Acquisition** | `P1` | ✅ DONE | Moteur de triage SaMD opérationnel (`calculate_clinical_triage_metrics`) : Éligible Traitement vs Référer CHU. |
 | **EVAL-03** | **Export ONNX & Benchmark de Latence Mobile** | `P2` | 📋 BACKLOG | Export du modèle épuré au format ONNX et validation de l'inférence $<50\text{ ms}$ sur CPU mobile. |
 | **EVAL-04** | **Documentation SaMD & Model Card Révisée** | `P2` | 📋 BACKLOG | Mise à jour de `MODEL_CARD.md` et `DATA_CARD.md` reflétant le positionnement d'aide au triage anatomique. |
 
 ---
 
 ## 🎯 Prochaine Action Immédiate (Sprint Actuel) :
-👉 **Lancer DATA-01 & DATA-05 :** Nettoyage automatique des corruptions d'images et bascule du classifieur sur les vraies classes anatomiques (`Type_1`, `Type_2`, `Type_3`) sans fausse étiquette de cancer.
+👉 **Lancer l'entraînement Weighted CrossEntropy (20 époques) :** Poids de classe inverses automatiques (Type 1 puni 2.4x plus fort) + Moteur de triage SaMD.
+

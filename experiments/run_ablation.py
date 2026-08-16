@@ -26,8 +26,8 @@ importlib.reload(src.models.classifier_lesion)
 from src.utils.seed import seed_everything
 from src.data.dataset import IVADataset
 from src.models.classifier_lesion import IVALesionClassifierStage2
-from src.utils.metrics import FocalLoss, calculate_clinical_metrics, evaluate_threshold_grid, calculate_anatomical_metrics
 from src.losses.asymmetric_loss import AsymmetricFocalLoss
+from src.utils.metrics import FocalLoss, calculate_clinical_metrics, evaluate_threshold_grid, calculate_anatomical_metrics, calculate_clinical_triage_metrics
 
 
 def _get_ablation_ckpt_path(loss_type: str) -> str:
@@ -143,18 +143,26 @@ def run_ablation_experiment(
     val_loader = DataLoader(val_ds, batch_size=batch_size, shuffle=False, num_workers=2)
     test_loader = DataLoader(test_ds, batch_size=batch_size, shuffle=False, num_workers=2)
 
+    # Calcul dynamique des poids de classe pour corriger le déséquilibre (Type 1 minoritaire)
+    train_labels = [s[1] for s in train_ds.samples] if hasattr(train_ds, 'samples') else [0]
+    class_counts = np.bincount(train_labels, minlength=3)
+    class_weights = len(train_labels) / (3.0 * np.maximum(class_counts, 1))
+    class_weights_tensor = torch.tensor(class_weights, dtype=torch.float32, device=device)
+    criterion_weighted_ce = nn.CrossEntropyLoss(weight=class_weights_tensor)
+    print(f"⚖️  Poids de classe automatiques : Type 1 = {class_weights[0]:.2f} | Type 2 = {class_weights[1]:.2f} | Type 3 = {class_weights[2]:.2f}")
+
     # Boucle d'entraînement avec reprise
     for epoch in range(start_epoch, epochs + 1):
         model.train()
         running_loss = 0.0
 
         # Stratégie de Loss :
-        # - anatomy / anatomy_ce : CrossEntropy sur les 3 vrais types anatomiques
+        # - anatomy / anatomy_ce : Weighted CrossEntropy sur les 3 vrais types anatomiques
         # - asymmetric : 2-Phase Warmup CE -> ASL sur classification binaire
         # - focal : Focal Loss standard
         if loss_type in ["anatomy", "anatomy_ce"]:
-            active_criterion = criterion_warmup
-            loss_name = "ANATOMY_CE_3CLASS"
+            active_criterion = criterion_weighted_ce
+            loss_name = "WEIGHTED_ANATOMY_CE"
             is_multiclass = True
         elif loss_type == "asymmetric":
             is_multiclass = False
@@ -272,6 +280,9 @@ def run_ablation_experiment(
 
     if is_multiclass:
         final_metrics = calculate_anatomical_metrics(test_targets_arr, test_probs)
+        triage_metrics = calculate_clinical_triage_metrics(test_targets_arr, test_probs, referral_threshold=0.35)
+        final_metrics['clinical_triage'] = triage_metrics
+
         print("\n" + "="*70)
         print(f"📊 RÉSULTATS TEST FINAL ANATOMIE ({loss_type.upper()})")
         print(f"  • Accuracy Globale : {final_metrics['accuracy']*100:.1f}%")
@@ -279,6 +290,12 @@ def run_ablation_experiment(
         print(f"  • Weighted-F1      : {final_metrics['weighted_f1']:.4f}")
         print(f"  • Macro AUC-ROC    : {final_metrics['macro_auc_roc']:.4f}")
         print(f"  • Matrice 3x3      : {final_metrics['confusion_matrix']}")
+        print("─"*70)
+        print("🏥 MOTEUR DE TRIAGE CLINIQUE SaMD (Directives OMS / IFCPC) :")
+        print(f"  • Sensibilité Éligibles (Type 1+2 Traitables) : {triage_metrics['sensitivity_eligible']*100:.1f}%")
+        print(f"  • Sécurité Référés (Type 3 envoyés au CHU)    : {triage_metrics['safety_specificity_type3']*100:.1f}%")
+        print(f"  • Précision de Triage Éligible                : {triage_metrics['precision_eligible']*100:.1f}%")
+        print(f"  • AUC-ROC Triage Clinique                     : {triage_metrics['triage_auc_roc']:.4f}")
         print("="*70)
     else:
         final_metrics = calculate_clinical_metrics(test_targets_arr, test_probs, threshold=best_threshold)

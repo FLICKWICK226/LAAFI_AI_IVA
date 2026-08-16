@@ -144,3 +144,55 @@ def calculate_anatomical_metrics(y_true: np.ndarray, y_pred_probs: np.ndarray) -
         "type_3": report.get("Type_3", {}),
     }
 
+
+def calculate_clinical_triage_metrics(y_true: np.ndarray, y_pred_probs: np.ndarray, referral_threshold: float = 0.35) -> dict:
+    """
+    Moteur de Triage Clinique SaMD (Directives OMS / IFCPC Screen-and-Treat) :
+    - ÉLIGIBLE TRAITEMENT LOCAL (Type 1 + Type 2) -> Label 1
+    - RÉFÉRENCE CHIRURGICALE CHU (Type 3)         -> Label 0
+
+    Sécurité Patient : Si P(Type 3) >= referral_threshold (défaut 0.35),
+    la patiente est référée au centre expert (Feu Rouge cryothérapie).
+    """
+    from sklearn.metrics import accuracy_score, recall_score, precision_score, roc_auc_score, confusion_matrix
+
+    # Vrai statut clinique : 1 = Éligible (Types 1 et 2), 0 = Inéligible (Type 3)
+    y_true_eligible = (y_true != 2).astype(int)
+
+    # Probabilité d'être éligible et d'être référé
+    prob_eligible = y_pred_probs[:, 0] + y_pred_probs[:, 1]
+    prob_referral = y_pred_probs[:, 2]
+
+    # Décision de triage clinique (Sécurisée)
+    # Si le risque de Type 3 dépasse le seuil, la patiente est référée (y_pred_eligible = 0)
+    y_pred_eligible = (prob_referral < referral_threshold).astype(int)
+
+    # Métriques cliniques de triage
+    triage_acc = accuracy_score(y_true_eligible, y_pred_eligible)
+    sens_eligible = recall_score(y_true_eligible, y_pred_eligible, pos_label=1, zero_division=0)
+    spec_safety = recall_score(y_true_eligible, y_pred_eligible, pos_label=0, zero_division=0) # Taux de Type 3 bien référés
+    prec_eligible = precision_score(y_true_eligible, y_pred_eligible, pos_label=1, zero_division=0)
+
+    try:
+        triage_auc = roc_auc_score(y_true_eligible, prob_eligible)
+    except Exception:
+        triage_auc = 0.5
+
+    cm = confusion_matrix(y_true_eligible, y_pred_eligible, labels=[0, 1]).tolist()
+
+    return {
+        "triage_accuracy": float(triage_acc),
+        "sensitivity_eligible": float(sens_eligible),
+        "safety_specificity_type3": float(spec_safety),
+        "precision_eligible": float(prec_eligible),
+        "triage_auc_roc": float(triage_auc),
+        "referral_threshold": float(referral_threshold),
+        "confusion_matrix_2x2": {
+            "true_referred_type3": cm[0][0],
+            "false_eligible_risk": cm[0][1],
+            "false_referred_type1_2": cm[1][0],
+            "true_eligible": cm[1][1]
+        }
+    }
+
+
