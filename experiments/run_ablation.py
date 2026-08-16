@@ -60,19 +60,18 @@ def run_ablation_experiment(
     with open(config_path, "r", encoding="utf-8") as f:
         cfg = yaml.safe_load(f)
 
-    # Instantier la loss sélectionnée
-    if loss_type == "asymmetric":
-        criterion = AsymmetricFocalLoss(gamma_pos=1.0, gamma_neg=4.0, clip=0.05)
-    else:
-        criterion = FocalLoss(alpha=0.75, gamma=2.0)
+    # Instantier les loss pour warmup et régime permanent
+    criterion_warmup = nn.CrossEntropyLoss()
+    criterion_asl = AsymmetricFocalLoss(gamma_pos=1.0, gamma_neg=4.0, clip=0.05)
+    criterion_focal = FocalLoss(alpha=0.75, gamma=2.0)
 
-    # Instantier le modèle ConvNeXt-Base
+    # Instantier le modèle (convnext_small par défaut ou configuré)
     model = IVALesionClassifierStage2(
-        backbone_name=cfg['stage2_classifier']['backbone'],
+        backbone_name=cfg['stage2_classifier'].get('backbone', 'convnext_small'),
         pretrained=True,
         num_classes_eligibility=3,
         num_classes_pathology=2,
-        drop_rate=float(cfg['stage2_classifier'].get('drop_rate', 0.4))
+        drop_rate=float(cfg['stage2_classifier'].get('drop_rate', 0.3))
     ).to(device)
 
     # Optimizer avec weight decay
@@ -81,6 +80,14 @@ def run_ablation_experiment(
         lr=float(cfg['stage2_classifier']['learning_rate']),
         weight_decay=float(cfg['stage2_classifier']['weight_decay'])
     )
+
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+        optimizer,
+        T_max=epochs,
+        eta_min=1e-6
+    )
+
+    scaler = torch.amp.GradScaler('cuda', enabled=(device.type == 'cuda'))
 
     # ── Reprise automatique depuis checkpoint ────────────────────────────────
     ckpt_path = _get_ablation_ckpt_path(loss_type)
@@ -94,6 +101,8 @@ def run_ablation_experiment(
             ckpt = torch.load(ckpt_path, map_location=device, weights_only=False)
             model.load_state_dict(ckpt['model_state_dict'])
             optimizer.load_state_dict(ckpt['optimizer_state_dict'])
+            if 'scheduler_state_dict' in ckpt:
+                scheduler.load_state_dict(ckpt['scheduler_state_dict'])
             start_epoch = ckpt['epoch'] + 1
             best_val_auc = ckpt.get('best_val_auc', 0.0)
             best_threshold = ckpt.get('best_threshold', 0.38)
@@ -125,26 +134,47 @@ def run_ablation_experiment(
     val_ds = IVADataset(csv_file=val_csv, is_train=False)
     test_ds = IVADataset(csv_file=test_csv, is_train=False)
 
-    train_loader = DataLoader(train_ds, batch_size=8, shuffle=True, num_workers=2, pin_memory=True)
-    val_loader = DataLoader(val_ds, batch_size=16, shuffle=False, num_workers=2)
-    test_loader = DataLoader(test_ds, batch_size=16, shuffle=False, num_workers=2)
+    batch_size = int(cfg['stage2_classifier'].get('batch_size', 16))
+    train_loader = DataLoader(train_ds, batch_size=batch_size, shuffle=True, num_workers=2, pin_memory=True)
+    val_loader = DataLoader(val_ds, batch_size=batch_size, shuffle=False, num_workers=2)
+    test_loader = DataLoader(test_ds, batch_size=batch_size, shuffle=False, num_workers=2)
 
     # Boucle d'entraînement avec reprise
     for epoch in range(start_epoch, epochs + 1):
         model.train()
         running_loss = 0.0
-        for images, targets, _ in tqdm(train_loader, desc=f"Époque {epoch}/{epochs} [{loss_type.upper()}]"):
-            images = images.to(device)
-            targets_patho = (targets > 0).long().to(device)
+
+        # Stratégie de Loss Warmup :
+        # Époques 1-3 : CrossEntropy (gradients pleins pour ancrer les poids du backbone)
+        # Époques 4+ : AsymmetricFocalLoss (spécificité maximale sans faux positifs)
+        if loss_type == "asymmetric":
+            if epoch <= 3:
+                active_criterion = criterion_warmup
+                loss_name = "WARMUP_CE"
+            else:
+                active_criterion = criterion_asl
+                loss_name = "ASYMMETRIC"
+        else:
+            active_criterion = criterion_focal
+            loss_name = "FOCAL"
+
+        for images, targets, _ in tqdm(train_loader, desc=f"Époque {epoch}/{epochs} [{loss_name}]"):
+            images = images.to(device, non_blocking=True)
+            targets_patho = (targets > 0).long().to(device, non_blocking=True)
 
             optimizer.zero_grad()
-            outputs = model(images)
-            logits = outputs['pathology']
-            loss = criterion(logits, targets_patho)
-            loss.backward()
-            optimizer.step()
+            with torch.amp.autocast('cuda', enabled=(device.type == 'cuda')):
+                outputs = model(images)
+                logits = outputs['pathology']
+                loss = active_criterion(logits, targets_patho)
+
+            scaler.scale(loss).backward()
+            scaler.step(optimizer)
+            scaler.update()
 
             running_loss += loss.item()
+
+        scheduler.step()
 
         # Évaluation Validation
         model.eval()
@@ -182,6 +212,7 @@ def run_ablation_experiment(
             'loss_type': loss_type,
             'model_state_dict': model.state_dict(),
             'optimizer_state_dict': optimizer.state_dict(),
+            'scheduler_state_dict': scheduler.state_dict(),
             'best_val_auc': best_val_auc,
             'best_threshold': best_threshold,
         }, ckpt_path)

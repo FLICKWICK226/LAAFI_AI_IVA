@@ -186,7 +186,8 @@ def train_laafi_ai_model(config_path: str = "./config/config.yaml") -> None:
             print(f"⚠️ Remarque torch.compile non appliqué : {e_comp}")
 
     criterion_eligibility = nn.CrossEntropyLoss()
-    criterion_pathology = AsymmetricFocalLoss(
+    criterion_pathology_warmup = nn.CrossEntropyLoss()
+    criterion_pathology_asl = AsymmetricFocalLoss(
         gamma_pos=float(cfg['stage2_classifier'].get('asl_gamma_pos', 1.0)),
         gamma_neg=float(cfg['stage2_classifier'].get('asl_gamma_neg', 4.0)),
         clip=float(cfg['stage2_classifier'].get('asl_clip', 0.05))
@@ -259,6 +260,9 @@ def train_laafi_ai_model(config_path: str = "./config/config.yaml") -> None:
         train_loss = 0.0
         optimizer.zero_grad()
 
+        # Choix de la loss pathologique : Warmup initial vs Asymmetric Focal Loss
+        active_criterion_patho = criterion_pathology_warmup if epoch <= warmup_epochs else criterion_pathology_asl
+
         pbar = tqdm(train_loader, desc=f"Epoch {epoch}/{cfg['stage2_classifier']['epochs']}", unit="batch")
         for step, (images, targets, _) in enumerate(pbar):
             images = images.to(device, non_blocking=True)
@@ -268,7 +272,7 @@ def train_laafi_ai_model(config_path: str = "./config/config.yaml") -> None:
                 outputs = model(images)
                 loss_elig = criterion_eligibility(outputs['eligibility'], targets)
                 targets_patho = (targets > 0).long()
-                loss_patho = criterion_pathology(outputs['pathology'], targets_patho)
+                loss_patho = active_criterion_patho(outputs['pathology'], targets_patho)
                 total_loss = (loss_elig + 2.0 * loss_patho) / accum_steps
 
             scaler.scale(total_loss).backward()
