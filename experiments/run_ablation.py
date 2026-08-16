@@ -144,12 +144,20 @@ def run_ablation_experiment(
     test_loader = DataLoader(test_ds, batch_size=batch_size, shuffle=False, num_workers=2)
 
     # Calcul dynamique des poids de classe pour corriger le déséquilibre (Type 1 minoritaire)
-    train_labels = [s[1] for s in train_ds.samples] if hasattr(train_ds, 'samples') else [0]
+    if hasattr(train_ds, 'df') and 'target' in train_ds.df.columns:
+        train_labels = train_ds.df['target'].values
+    elif hasattr(train_ds, 'df') and 'label' in train_ds.df.columns:
+        label_map = {'Type_1': 0, 'Type_2': 1, 'Type_3': 2}
+        train_labels = train_ds.df['label'].map(label_map).dropna().astype(int).values
+    else:
+        train_labels = np.array([0, 1, 2])
+
     class_counts = np.bincount(train_labels, minlength=3)
-    class_weights = len(train_labels) / (3.0 * np.maximum(class_counts, 1))
+    total_samples = len(train_labels)
+    class_weights = total_samples / (3.0 * np.maximum(class_counts, 1).astype(float))
     class_weights_tensor = torch.tensor(class_weights, dtype=torch.float32, device=device)
     criterion_weighted_ce = nn.CrossEntropyLoss(weight=class_weights_tensor)
-    print(f"⚖️  Poids de classe automatiques : Type 1 = {class_weights[0]:.2f} | Type 2 = {class_weights[1]:.2f} | Type 3 = {class_weights[2]:.2f}")
+    print(f"⚖️  Poids de classe automatiques : Type 1 = {class_weights[0]:.2f} | Type 2 = {class_weights[1]:.2f} | Type 3 = {class_weights[2]:.2f} (Effectifs : Type 1={class_counts[0]}, Type 2={class_counts[1]}, Type 3={class_counts[2]})")
 
     # Boucle d'entraînement avec reprise
     for epoch in range(start_epoch, epochs + 1):
