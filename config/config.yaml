@@ -41,9 +41,10 @@ stage2_classifier:
   gradient_accumulation_steps: 1
   warmup_epochs: 2  # Warmup réduit à 2 époques
   early_stopping_patience: 5
-  learning_rate: 1.0e-4
-  weight_decay: 1.0e-3
-  drop_rate: 0.3
+  learning_rate: 1.0e-4        # LR Backbone pré-entraîné
+  head_learning_rate: 1.0e-3   # LR Têtes de classification (10x plus élevé pour convergence rapide)
+  weight_decay: 1.0e-4         # Régularisation modérée
+  drop_rate: 0.2               # Dropout optimisé pour éviter le sous-apprentissage
   asl_gamma_pos: 1.0
   asl_gamma_neg: 4.0
   asl_clip: 0.05

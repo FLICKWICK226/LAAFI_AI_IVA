@@ -193,11 +193,16 @@ def train_laafi_ai_model(config_path: str = "./config/config.yaml") -> None:
         clip=float(cfg['stage2_classifier'].get('asl_clip', 0.05))
     )
     
-    optimizer = torch.optim.AdamW(
-        raw_model.parameters(),
-        lr=float(cfg['stage2_classifier']['learning_rate']),
-        weight_decay=float(cfg['stage2_classifier']['weight_decay'])
-    )
+    # Optimizer avec Differential Learning Rate (Backbone à 1e-4, Têtes à 1e-3)
+    backbone_lr = float(cfg['stage2_classifier'].get('learning_rate', 1e-4))
+    head_lr = float(cfg['stage2_classifier'].get('head_learning_rate', 1e-3))
+    weight_decay = float(cfg['stage2_classifier'].get('weight_decay', 1e-4))
+
+    optimizer = torch.optim.AdamW([
+        {'params': raw_model.backbone.parameters(), 'lr': backbone_lr},
+        {'params': raw_model.head_pathology.parameters(), 'lr': head_lr},
+        {'params': raw_model.head_eligibility.parameters(), 'lr': head_lr}
+    ], weight_decay=weight_decay)
     
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
         optimizer,

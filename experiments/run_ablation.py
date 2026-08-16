@@ -74,12 +74,16 @@ def run_ablation_experiment(
         drop_rate=float(cfg['stage2_classifier'].get('drop_rate', 0.3))
     ).to(device)
 
-    # Optimizer avec weight decay
-    optimizer = torch.optim.AdamW(
-        model.parameters(),
-        lr=float(cfg['stage2_classifier']['learning_rate']),
-        weight_decay=float(cfg['stage2_classifier']['weight_decay'])
-    )
+    # Optimizer avec Differential Learning Rate (Backbone à 1e-4, Têtes à 1e-3)
+    backbone_lr = float(cfg['stage2_classifier'].get('learning_rate', 1e-4))
+    head_lr = float(cfg['stage2_classifier'].get('head_learning_rate', 1e-3))
+    weight_decay = float(cfg['stage2_classifier'].get('weight_decay', 1e-4))
+
+    optimizer = torch.optim.AdamW([
+        {'params': model.backbone.parameters(), 'lr': backbone_lr},
+        {'params': model.head_pathology.parameters(), 'lr': head_lr},
+        {'params': model.head_eligibility.parameters(), 'lr': head_lr}
+    ], weight_decay=weight_decay)
 
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
         optimizer,

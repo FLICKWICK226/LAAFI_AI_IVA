@@ -14,7 +14,7 @@ class IVALesionClassifierStage2(nn.Module):
         pretrained: bool = True,
         num_classes_eligibility: int = 3,
         num_classes_pathology: int = 2,
-        drop_rate: float = 0.4
+        drop_rate: float = 0.2
     ):
         super().__init__()
         self.backbone_name = backbone_name
