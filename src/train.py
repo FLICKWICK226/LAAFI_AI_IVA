@@ -22,7 +22,8 @@ importlib.reload(src.data.dataset)
 
 from src.data.dataset import IVADataset
 from src.models.classifier_lesion import IVALesionClassifierStage2
-from src.utils.metrics import FocalLoss, calculate_clinical_metrics, evaluate_threshold_grid
+from src.utils.metrics import calculate_clinical_metrics, evaluate_threshold_grid
+from src.losses.asymmetric_loss import AsymmetricFocalLoss
 
 def fast_sync_to_ssd(src_dir: str, dst_dir: str) -> None:
     """
@@ -185,9 +186,10 @@ def train_laafi_ai_model(config_path: str = "./config/config.yaml") -> None:
             print(f"⚠️ Remarque torch.compile non appliqué : {e_comp}")
 
     criterion_eligibility = nn.CrossEntropyLoss()
-    criterion_pathology = FocalLoss(
-        alpha=cfg['stage2_classifier']['focal_loss_alpha'],
-        gamma=cfg['stage2_classifier']['focal_loss_gamma']
+    criterion_pathology = AsymmetricFocalLoss(
+        gamma_pos=float(cfg['stage2_classifier'].get('asl_gamma_pos', 1.0)),
+        gamma_neg=float(cfg['stage2_classifier'].get('asl_gamma_neg', 4.0)),
+        clip=float(cfg['stage2_classifier'].get('asl_clip', 0.05))
     )
     
     optimizer = torch.optim.AdamW(

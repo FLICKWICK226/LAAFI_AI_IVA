@@ -82,4 +82,3 @@ tmp_*.json
 usefuls*.md
 kaggle_runner/
 kaggle/
-create_valid_notebook.py

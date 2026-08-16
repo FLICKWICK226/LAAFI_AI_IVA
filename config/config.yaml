@@ -34,18 +34,19 @@ stage1_yolo:
   confidence_threshold: 0.25
 
 stage2_classifier:
-  backbone: "convnext_base"
+  backbone: "convnext_small" # ou convnext_base, efficientnet_b3 (3x plus rapide sur T4)
   num_classes: 2
-  epochs: 30
-  batch_size: 8   # Réduit à 8 pour garantir < 8 Go VRAM sur GPU T4 (Evite CUDA OOM)
-  gradient_accumulation_steps: 2  # Batch size effectif = 8 * 2 = 16
-  warmup_epochs: 3  # Levier 5 : Backbone gelé pendant 3 epochs
-  early_stopping_patience: 4  # Early stopping déclenché si 4 epochs sans amélioration (Epoch 25 optimal)
+  epochs: 25
+  batch_size: 16   # Grâce à convnext_small, batch_size=16 passe sans OOM sur T4
+  gradient_accumulation_steps: 1
+  warmup_epochs: 2  # Warmup réduit à 2 époques
+  early_stopping_patience: 5
   learning_rate: 1.0e-4
-  weight_decay: 1.0e-3  # Régularisation AdamW renforcée (1e-3)
-  drop_rate: 0.4  # Dropout augmenté à 0.4 pour contrer le surapprentissage
-  focal_loss_gamma: 2.0
-  focal_loss_alpha: 0.75
+  weight_decay: 1.0e-3
+  drop_rate: 0.3
+  asl_gamma_pos: 1.0
+  asl_gamma_neg: 4.0
+  asl_clip: 0.05
   threshold_calibration:
     min_t: 0.10
     max_t: 0.90

@@ -46,7 +46,7 @@
 
 * **Jour 8 — Gel du Teacher :**
   - Charger les poids du Teacher `ConvNeXt-Base` et passer en mode `eval()` sans écriture disque volumineuse.
-* **Jours 9-10 — Loss KD Binaire & Attention Transfer (`src/distillation/kd_trainer.py`) :**
+* **Jours 9-10 — Loss KD Binaire & Attention Transfer (`src/distillation/kd_loss.py`) :**
   - Implémenter `BinaryHybridKDLoss` avec Soft-BCE ($T=4.0$) et alignement d'attention spatiale via `AdaptiveAvgPool2d`.
 * **Jours 11-12 — Entraînement du Student :**
   - Entraîner `MobileNetV4-Small` (via `timm`, $384 \times 384$) avec schedule `CosineAnnealingLR` et LLRD ($LR_{\text{backbone}}=10^{-5}, LR_{\text{head}}=10^{-4}$).
@@ -85,99 +85,7 @@
 
 ---
 
-## 🛠️ 3. Code PyTorch de Référence (Zéro-Bug & Prêt à Déployer)
-
-### 3.1 Preprocessing Reflets-Lite (`src/preprocessing/cervix_transforms.py`)
-
-```python
-import cv2
-import numpy as np
-
-class SpecularReflectionMasker:
-    """Masquage binaire ultra-rapide (<2ms CPU) avec remplacement par la couleur moyenne du col."""
-    def __init__(self, v_threshold=235):
-        self.v_threshold = v_threshold
-
-    def __call__(self, img_np: np.ndarray) -> np.ndarray:
-        hsv = cv2.cvtColor(img_np, cv2.COLOR_RGB2HSV)
-        v = hsv[:, :, 2]
-        
-        _, mask = cv2.threshold(v, self.v_threshold, 255, cv2.THRESH_BINARY)
-        
-        if np.any(mask):
-            # Remplacement des pixels par la couleur moyenne des zones non saturées du col
-            mean_color = cv2.mean(img_np, mask=cv2.bitwise_not(mask))[:3]
-            img_np[mask == 255] = np.array(mean_color, dtype=np.uint8)
-            
-        return img_np
-```
-
-### 3.2 Loss KD Binaire & Attention Transfer (`src/distillation/kd_trainer.py`)
-
-```python
-import torch
-import torch.nn as nn
-import torch.nn.functional as F
-
-class BinaryHybridKDLoss(nn.Module):
-    """Distillation Binaire Valide (Soft-BCE Logits + Spatial Attention Transfer)."""
-    def __init__(self, alpha_kd=0.6, beta_attn=100.0, temperature=4.0):
-        super().__init__()
-        self.alpha_kd = alpha_kd
-        self.beta_attn = beta_attn
-        self.T = temperature
-        self.bce = nn.BCEWithLogitsLoss()
-
-    def _get_attention_map(self, feature_map: torch.Tensor, target_size: tuple) -> torch.Tensor:
-        spatial_map = feature_map.pow(2).mean(1, keepdim=True)
-        resampled_map = F.adaptive_avg_pool2d(spatial_map, target_size)
-        return F.normalize(resampled_map.view(resampled_map.size(0), -1), p=2, dim=1)
-
-    def forward(self, student_logits, teacher_logits, student_feats, teacher_feats, targets):
-        # 1. Soft-BCE Loss pour classification binaire (Logit unique [B, 1])
-        teacher_probs = torch.sigmoid(teacher_logits / self.T)
-        loss_kd = F.binary_cross_entropy_with_logits(
-            student_logits / self.T, teacher_probs
-        ) * (self.T ** 2)
-
-        # 2. Hard-Target Loss Clinique
-        loss_cls = self.bce(student_logits.view(-1), targets.float().view(-1))
-
-        # 3. Attention Transfer avec alignement spatial adaptatif
-        target_shape = student_feats.shape[2:]
-        s_attn = self._get_attention_map(student_feats, target_shape)
-        t_attn = self._get_attention_map(teacher_feats, target_shape)
-        loss_attn = F.mse_loss(s_attn, t_attn)
-
-        return (1 - self.alpha_kd) * loss_cls + self.alpha_kd * loss_kd + self.beta_attn * loss_attn
-```
-
-### 3.3 Pipeline d'Export ExecuTorch (`export/export_executorch.py`)
-
-```python
-import torch
-import timm
-
-def export_student_to_executorch(model_path: str, output_path: str = "laafi_student_384.pt2"):
-    model = timm.create_model('mobilenetv4_conv_small', pretrained=False, num_classes=1)
-    model.load_state_dict(torch.load(model_path))
-    model.eval()
-
-    example_inputs = (torch.randn(1, 3, 384, 384),)
-
-    print("🚀 Export Graph via torch.export.export() avec entrée 384x384...")
-    exported_program = torch.export.export(model, example_inputs)
-    
-    torch.export.save(exported_program, output_path)
-    print(f"✅ Graphe PyTorch exporté prêt pour ExecuTorch SDK : {output_path}")
-
-if __name__ == "__main__":
-    pass
-```
-
----
-
-## 📊 4. Grille d'Acceptation Release (Gate Opérationnel)
+## 📊 3. Grille d'Acceptation Release (Gate Opérationnel)
 
 | Critère de Contrôle | Seuil Strict Pass/Fail | Méthode de Validation |
 | :--- | :--- | :--- |

@@ -1,4 +1,4 @@
-# 🔬 WHOLEPROJECT.md — Architecture, Spécifications Cliniques & Feuille de Route SOTA (LAAFI_AI_VIA)
+# 🔬 WHOLEPROJECT_SPEC.md — Architecture, Spécifications Cliniques & Feuille de Route SOTA (LAAFI_AI_VIA)
 
 > **Document de Référence Technique & Brief de Recherche Deep Search**  
 > **Projet :** LAAFI_AI_VIA Engine (Version 2.0)  
@@ -83,7 +83,7 @@ L'IVA traditionnelle présente toutefois une variabilité inter-observateur crit
 
 Pour passer du modèle R&D `ConvNeXt-Base` ($340 \text{ MB}$) au binaire Edge ($< 25 \text{ MB}$) sans perte clinique :
 
-```
+```text
 [ Teacher: ConvNeXt-Base (88M params / 340 MB) ] ──► (Génère Logits Lisses T=4.0)
                                  │
                                  ▼ Knowledge Distillation (KD)
@@ -104,49 +104,41 @@ $$\mathcal{L}_{\text{total}} = (1 - \alpha_{\text{kd}}) \cdot \mathcal{L}_{\text
 Cette section définit les **8 axes prioritaires de recherche bibliographique et d'exploration scientifique** pour propulser l'état de l'art du moteur LAAFI_AI_VIA :
 
 ### Axis 1 : Self-Supervised Pretraining (SSL) sur Imagerie Gynécologique / IVA
-
 - **Sujet :** L'entraînement pré-requis sur ImageNet présente un biais de domaine fort par rapport à l'imagerie muqueuse cervicale.
 - **Mots-clés Deep Search :** `Self-Supervised Learning cervical VIA`, `DINOv2 fine-tuning medical colposcopy`, `SimCLR medical endoscopy`, `Masked Autoencoders (MAE) cervical lesions`.
 - **Objectif :** Évaluer si un pré-entraînement SSL non supervisé sur des milliers d'images VIA brutes améliore la séparation des classes et la spécificité (+3 à +5%).
 
 ### Axis 2 : Loss Functions Spécifiques pour Asymétrie Clinique & Classes Déséquilibrées
-
 - **Sujet :** Optimisation de la fonction d'objectif au-delà de la Focal Loss classique.
 - **Mots-clés Deep Search :** `Asymmetric Loss (ASL) for medical classification`, `AUC-ROC direct maximization loss`, `Dice-Focal hybrid loss binary medical`, `Cost-sensitive learning false negative penalty`.
 - **Objectif :** Tester des pertes optimisant directement l'aire sous la courbe ROC ou la pénalité asymétrique non linéaire pour stabiliser la spécificité au-dessus de 88%.
 
 ### Axis 3 : Test-Time Augmentation (TTA) Ultra-Léger pour Inférence Edge
-
 - **Sujet :** Améliorer la robustesse des prédictions sur smartphone lors des prises de vue de mauvaise qualité sans exploser la latence.
 - **Mots-clés Deep Search :** `Efficient Test-Time Augmentation Edge AI`, `Low-latency TTA smartphone inference`, `Multi-crop geometric TTA medical mobile`.
 - **Objectif :** Concevoir une stratégie TTA à 2 ou 3 flips/rotations légères en $< 80 \text{ ms}$ supplémentaires pour lisser les incertitudes de prédiction.
 
 ### Axis 4 : Attention-Guided Feature Distillation (KD Attention-Based)
-
 - **Sujet :** Transférer non seulement les logits de sortie du Teacher vers le Student, mais également les cartes d'attention visuelle sur la JSC.
 - **Mots-clés Deep Search :** `Attention Transfer Knowledge Distillation medical`, `Feature-based distillation ConvNeXt to MobileNet`, `Grad-CAM guided distillation loss`.
 - **Objectif :** Forcer le modèle Student léger (`MobileNetV4`) à focaliser son attention sur les mêmes zones vasculaires et acéto-blanches que le Teacher `ConvNeXt-Base`.
 
 ### Axis 5 : Adaptation de Domaine & Robustesse aux Caméras Smartphones (Domain Generalization)
-
 - **Sujet :** Variabilité de capteurs CMOS, de température de couleur du flash LED et d'optiques entre différentes marques de smartphones (Xiaomi vs Samsung vs Tecno).
 - **Mots-clés Deep Search :** `Domain Generalization smartphone medical imaging`, `Color constancy algorithm VIA acetic acid`, `Stain normalization cervical VIA`, `StyleAugment mobile medical vision`.
 - **Objectif :** Garantir que les performances (Sensibilité 95%+, Spécificité 85%+) ne chutent pas lors du passage d'un modèle de smartphone à un autre.
 
 ### Axis 6 : Multi-Task Learning & Joint Eligibility/Diagnosis Architecture
-
 - **Sujet :** Prédire conjointement l'éligibilité anatomique (Type 1/2 vs Type 3) et le diagnostic lésionnel (Sain vs VIA+) au sein d'une seule tête multi-tâche.
 - **Mots-clés Deep Search :** `Multi-task learning cervical VIA classification`, `Joint eligibility and lesion diagnosis CNN`, `Hard parameter sharing medical vision`.
 - **Objectif :** Mutualiser les représentations de caractéristiques et réduire la taille totale du modèle par rapport à deux réseaux séparés.
 
 ### Axis 7 : Quantification Améliorée (QAT - Quantization-Aware Training) vs PTQ
-
 - **Sujet :** Éviter toute perte de sensibilité lors du passage de FP32 à INT8 sur le processeur mobile ARM.
 - **Mots-clés Deep Search :** `Quantization-Aware Training PyTorch mobile`, `INT8 quantization accuracy drop medical CNN`, `ONNX Runtime INT8 calibration medical`.
 - **Objectif :** Comparer la quantification PTQ avec la quantification QAT pour garantir un delta de sensibilité $< 0.5\%$ après conversion 8-bit.
 
 ### Axis 8 : Triage Tri-Classe & Calibration des Probabilités (Platt Scaling / Temperature Scaling)
-
 - **Sujet :** Régulariser et calibrer les probabilités de sortie du modèle pour le système de triage Vert / Jaune / Rouge.
 - **Mots-clés Deep Search :** `Probability calibration medical classification`, `Temperature scaling binary decision`, `Tri-class risk triage thresholding`.
 - **Objectif :** Garantir que la probabilité prédite $P$ corresponde exactement au risque clinique réel de lésion précancéreuse CIN2+.
