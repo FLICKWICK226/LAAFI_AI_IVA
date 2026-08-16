@@ -26,7 +26,7 @@ importlib.reload(src.models.classifier_lesion)
 from src.utils.seed import seed_everything
 from src.data.dataset import IVADataset
 from src.models.classifier_lesion import IVALesionClassifierStage2
-from src.utils.metrics import FocalLoss, calculate_clinical_metrics, evaluate_threshold_grid
+from src.utils.metrics import FocalLoss, calculate_clinical_metrics, evaluate_threshold_grid, calculate_anatomical_metrics
 from src.losses.asymmetric_loss import AsymmetricFocalLoss
 
 
@@ -148,10 +148,16 @@ def run_ablation_experiment(
         model.train()
         running_loss = 0.0
 
-        # Stratégie de Loss Warmup :
-        # Époques 1-3 : CrossEntropy (gradients pleins pour ancrer les poids du backbone)
-        # Époques 4+ : AsymmetricFocalLoss (spécificité maximale sans faux positifs)
-        if loss_type == "asymmetric":
+        # Stratégie de Loss :
+        # - anatomy / anatomy_ce : CrossEntropy sur les 3 vrais types anatomiques
+        # - asymmetric : 2-Phase Warmup CE -> ASL sur classification binaire
+        # - focal : Focal Loss standard
+        if loss_type in ["anatomy", "anatomy_ce"]:
+            active_criterion = criterion_warmup
+            loss_name = "ANATOMY_CE_3CLASS"
+            is_multiclass = True
+        elif loss_type == "asymmetric":
+            is_multiclass = False
             if epoch <= 3:
                 active_criterion = criterion_warmup
                 loss_name = "WARMUP_CE"
@@ -159,18 +165,22 @@ def run_ablation_experiment(
                 active_criterion = criterion_asl
                 loss_name = "ASYMMETRIC"
         else:
+            is_multiclass = False
             active_criterion = criterion_focal
             loss_name = "FOCAL"
 
         for images, targets, _ in tqdm(train_loader, desc=f"Époque {epoch}/{epochs} [{loss_name}]"):
             images = images.to(device, non_blocking=True)
-            targets_patho = (targets > 0).long().to(device, non_blocking=True)
+            if is_multiclass:
+                targets_cls = targets.long().to(device, non_blocking=True)
+            else:
+                targets_cls = (targets > 0).long().to(device, non_blocking=True)
 
             optimizer.zero_grad()
             with torch.amp.autocast('cuda', enabled=(device.type == 'cuda')):
                 outputs = model(images)
-                logits = outputs['pathology']
-                loss = active_criterion(logits, targets_patho)
+                logits = outputs['eligibility'] if is_multiclass else outputs['pathology']
+                loss = active_criterion(logits, targets_cls)
 
             scaler.scale(loss).backward()
             scaler.step(optimizer)
@@ -187,28 +197,46 @@ def run_ablation_experiment(
             for images, targets, _ in val_loader:
                 images = images.to(device)
                 outputs = model(images)
-                probs = torch.softmax(outputs['pathology'], dim=1)[:, 1].cpu().numpy()
-                val_probs.extend(probs)
-                val_targets_list.extend((targets > 0).cpu().numpy())
+                if is_multiclass:
+                    probs = torch.softmax(outputs['eligibility'], dim=1).cpu().numpy()
+                    val_probs.extend(probs)
+                    val_targets_list.extend(targets.cpu().numpy())
+                else:
+                    probs = torch.softmax(outputs['pathology'], dim=1)[:, 1].cpu().numpy()
+                    val_probs.extend(probs)
+                    val_targets_list.extend((targets > 0).cpu().numpy())
 
         val_probs = np.array(val_probs)
         val_targets_arr = np.array(val_targets_list)
 
-        # Calibration du seuil T sur Validation (Recall >= 95%)
-        grid_eval = evaluate_threshold_grid(val_targets_arr, val_probs)
-        opt_res = grid_eval['optimal']
+        if is_multiclass:
+            anat_res = calculate_anatomical_metrics(val_targets_arr, val_probs)
+            if anat_res['macro_f1'] > best_val_auc:
+                best_val_auc = anat_res['macro_f1']
+            epoch_log = (
+                f"Époque {epoch:02d} | Loss: {running_loss/len(train_loader):.4f} "
+                f"| Val Accuracy: {anat_res['accuracy']*100:.1f}% "
+                f"| Macro-F1: {anat_res['macro_f1']:.4f} "
+                f"| Macro-AUC: {anat_res['macro_auc_roc']:.4f}"
+            )
+            print(epoch_log)
+            print(f"   ↳ Recall : Type 1: {anat_res['type_1'].get('recall', 0)*100:.1f}% | Type 2: {anat_res['type_2'].get('recall', 0)*100:.1f}% | Type 3: {anat_res['type_3'].get('recall', 0)*100:.1f}%")
+        else:
+            # Calibration du seuil T sur Validation (Recall >= 95%)
+            grid_eval = evaluate_threshold_grid(val_targets_arr, val_probs)
+            opt_res = grid_eval['optimal']
 
-        if opt_res['auc_roc'] > best_val_auc:
-            best_val_auc = opt_res['auc_roc']
-            best_threshold = opt_res['threshold']
+            if opt_res['auc_roc'] > best_val_auc:
+                best_val_auc = opt_res['auc_roc']
+                best_threshold = opt_res['threshold']
 
-        epoch_log = (
-            f"Époque {epoch:02d} | Loss: {running_loss/len(train_loader):.4f} "
-            f"| Val AUC: {opt_res['auc_roc']:.4f} "
-            f"| Val Spec (Recall>=95%): {opt_res['specificity']*100:.1f}% "
-            f"| Seuil: {opt_res['threshold']:.2f}"
-        )
-        print(epoch_log)
+            epoch_log = (
+                f"Époque {epoch:02d} | Loss: {running_loss/len(train_loader):.4f} "
+                f"| Val AUC: {opt_res['auc_roc']:.4f} "
+                f"| Val Spec (Recall>=95%): {opt_res['specificity']*100:.1f}% "
+                f"| Seuil: {opt_res['threshold']:.2f}"
+            )
+            print(epoch_log)
 
         # ── Sauvegarde checkpoint de reprise (écrasement à chaque époque) ────
         torch.save({
@@ -223,28 +251,46 @@ def run_ablation_experiment(
         print(f"💾 Checkpoint sauvegardé → {ckpt_path} (reprise possible depuis l'époque {epoch + 1})")
         # ────────────────────────────────────────────────────────────────────
 
-    # Évaluation finale sur Test Set à aveugle avec le seuil gelé
+    # Évaluation finale sur Test Set à aveugle
     model.eval()
     test_probs, test_targets_list = [], []
     with torch.no_grad():
         for images, targets, _ in test_loader:
             images = images.to(device)
             outputs = model(images)
-            probs = torch.softmax(outputs['pathology'], dim=1)[:, 1].cpu().numpy()
-            test_probs.extend(probs)
-            test_targets_list.extend((targets > 0).cpu().numpy())
+            if is_multiclass:
+                probs = torch.softmax(outputs['eligibility'], dim=1).cpu().numpy()
+                test_probs.extend(probs)
+                test_targets_list.extend(targets.cpu().numpy())
+            else:
+                probs = torch.softmax(outputs['pathology'], dim=1)[:, 1].cpu().numpy()
+                test_probs.extend(probs)
+                test_targets_list.extend((targets > 0).cpu().numpy())
 
     test_probs = np.array(test_probs)
     test_targets_arr = np.array(test_targets_list)
 
-    final_metrics = calculate_clinical_metrics(test_targets_arr, test_probs, threshold=best_threshold)
-    print("\n" + "="*70)
-    print(f"📊 RÉSULTATS TEST FINAL ({loss_type.upper()}) | Seuil Gelé T = {best_threshold:.2f}")
-    print(f"  • Sensibilité (Recall) : {final_metrics['sensitivity']*100:.1f}%")
-    print(f"  • Spécificité          : {final_metrics['specificity']*100:.1f}%")
-    print(f"  • Score F2             : {final_metrics['f2_score']:.4f}")
-    print(f"  • AUC-ROC              : {final_metrics['auc_roc']:.4f}")
-    print("="*70)
+    if is_multiclass:
+        final_metrics = calculate_anatomical_metrics(test_targets_arr, test_probs)
+        print("\n" + "="*70)
+        print(f"📊 RÉSULTATS TEST FINAL ANATOMIE ({loss_type.upper()})")
+        print(f"  • Accuracy Globale : {final_metrics['accuracy']*100:.1f}%")
+        print(f"  • Macro-F1 Score   : {final_metrics['macro_f1']:.4f}")
+        print(f"  • Weighted-F1      : {final_metrics['weighted_f1']:.4f}")
+        print(f"  • Macro AUC-ROC    : {final_metrics['macro_auc_roc']:.4f}")
+        print(f"  • Matrice 3x3      : {final_metrics['confusion_matrix']}")
+        print("="*70)
+    else:
+        final_metrics = calculate_clinical_metrics(test_targets_arr, test_probs, threshold=best_threshold)
+        print("\n" + "="*70)
+        print(f"📊 RÉSULTATS TEST FINAL ({loss_type.upper()}) | Seuil Gelé T = {best_threshold:.2f}")
+        print(f"  • Sensibilité (Recall) : {final_metrics['sensitivity']*100:.1f}%")
+        print(f"  • Spécificité          : {final_metrics['specificity']*100:.1f}%")
+        print(f"  • Score F2             : {final_metrics['f2_score']:.4f}")
+        print(f"  • AUC-ROC              : {final_metrics['auc_roc']:.4f}")
+        print("="*70)
+
+    return final_metrics
 
     # Nettoyage du checkpoint de reprise après succès
     if os.path.exists(ckpt_path):

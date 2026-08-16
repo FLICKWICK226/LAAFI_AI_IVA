@@ -58,20 +58,20 @@ class FastPerlinNoiseLoader:
         blended = (image * (1.0 - alpha) + overlay * alpha).astype(np.uint8)
         return blended
 
-def build_iva_augmentation_pipeline(is_train: bool = True, specular_proba: float = 0.4) -> A.Compose:
+def build_iva_augmentation_pipeline(is_train: bool = True, img_size: tuple = (224, 224), specular_proba: float = 0.4) -> A.Compose:
     """
     Pipeline d'augmentation rapide et robuste pour imagerie de terrain IVA.
     Hue Shift strictly <= 0.05 per Rule 3.
-    Action 3.2 : Ajout de RandomSunFlare pour simuler les reflets spéculaires intenses de flash LED.
     """
+    h, w = img_size
     if not is_train:
         return A.Compose([
-            A.Resize(384, 384),
+            A.Resize(h, w),
             A.Normalize(mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225)),
         ])
 
     return A.Compose([
-        A.Resize(384, 384),
+        A.Resize(h, w),
         A.HorizontalFlip(p=0.5),
         A.VerticalFlip(p=0.5),
         A.RandomRotate90(p=0.5),

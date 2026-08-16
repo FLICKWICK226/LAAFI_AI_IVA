@@ -107,3 +107,40 @@ def categorize_tri_class(y_prob: np.ndarray, low_t: float = 0.20, high_t: float 
     categories[y_prob >= high_t] = 2                      # Red
     return categories
 
+
+def calculate_anatomical_metrics(y_true: np.ndarray, y_pred_probs: np.ndarray) -> dict:
+    """
+    Calcule les métriques rigoureuses de classification anatomique (Type 1, Type 2, Type 3) :
+    - Accuracy globale
+    - Macro-F1 et Weighted-F1
+    - Précision et Rappel par classe
+    - Matrice de confusion 3x3
+    - Macro AUC-ROC One-vs-Rest
+    """
+    from sklearn.metrics import classification_report, confusion_matrix, accuracy_score, f1_score
+    y_pred = np.argmax(y_pred_probs, axis=1)
+
+    acc = accuracy_score(y_true, y_pred)
+    macro_f1 = f1_score(y_true, y_pred, average='macro', zero_division=0)
+    weighted_f1 = f1_score(y_true, y_pred, average='weighted', zero_division=0)
+    cm = confusion_matrix(y_true, y_pred, labels=[0, 1, 2]).tolist()
+
+    try:
+        auc_roc = roc_auc_score(y_true, y_pred_probs, multi_class='ovr', average='macro')
+    except Exception:
+        auc_roc = 0.5
+
+    # Rappel et précision par classe
+    report = classification_report(y_true, y_pred, target_names=['Type_1', 'Type_2', 'Type_3'], output_dict=True, zero_division=0)
+
+    return {
+        "accuracy": float(acc),
+        "macro_f1": float(macro_f1),
+        "weighted_f1": float(weighted_f1),
+        "macro_auc_roc": float(auc_roc),
+        "confusion_matrix": cm,
+        "type_1": report.get("Type_1", {}),
+        "type_2": report.get("Type_2", {}),
+        "type_3": report.get("Type_3", {}),
+    }
+

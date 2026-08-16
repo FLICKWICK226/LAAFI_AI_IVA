@@ -20,43 +20,32 @@ paths:
 
 dataset:
   kaggle_dataset: "intel-mobileodt-cervical-cancer-screening"
-  img_size: [384, 384]
+  img_size: [224, 224] # Format 224x224 optimal (5x plus rapide sur T4)
   train_ratio: 0.70
   val_ratio: 0.15
   test_ratio: 0.15
   num_perlin_masks: 1000
 
 stage1_yolo:
-  model_type: "yolov8n-det" # ou yolov11n-det
+  model_type: "yolov8n-det"
   epochs: 50
   batch_size: 16
   img_size: 640
   confidence_threshold: 0.25
 
 stage2_classifier:
-  backbone: "convnext_small" # ou convnext_base, efficientnet_b3 (3x plus rapide sur T4)
-  num_classes: 2
-  epochs: 25
-  batch_size: 16   # Grâce à convnext_small, batch_size=16 passe sans OOM sur T4
+  backbone: "convnext_small" # ou mobilenetv4_conv_medium, efficientnet_b0
+  num_classes: 3   # Tri-classes : Type 1 (0), Type 2 (1), Type 3 (2)
+  epochs: 20
+  batch_size: 32   # Batch size 32 sur 224x224 passe parfaitement sans OOM
   gradient_accumulation_steps: 1
-  warmup_epochs: 2  # Warmup réduit à 2 époques
+  warmup_epochs: 2
   early_stopping_patience: 5
   learning_rate: 1.0e-4        # LR Backbone pré-entraîné
   head_learning_rate: 1.0e-3   # LR Têtes de classification (10x plus élevé pour convergence rapide)
   weight_decay: 1.0e-4         # Régularisation modérée
-  drop_rate: 0.2               # Dropout optimisé pour éviter le sous-apprentissage
-  asl_gamma_pos: 1.0
-  asl_gamma_neg: 4.0
-  asl_clip: 0.05
-  threshold_calibration:
-    min_t: 0.10
-    max_t: 0.90
-    step: 0.01
-    target_recall: 0.95
-  tri_class_triage:
-    green_max: 0.20   # P < 0.20 -> Vert (Négatif, contrôle 3 ans)
-    yellow_max: 0.38  # 0.20 <= P < 0.38 -> Jaune (Incertain, 2nd badigeon / 2e avis)
-    red_min: 0.38     # P >= 0.38 -> Rouge (Positif, référer / traitement)
+  drop_rate: 0.2               # Dropout optimisé
+  loss_type: "cross_entropy"   # Multi-classes standard pour l'éligibilité anatomique
 
 augmentations:
   hue_shift_limit: 0.05
