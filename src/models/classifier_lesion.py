@@ -10,7 +10,7 @@ class IVALesionClassifierStage2(nn.Module):
     """
     def __init__(
         self,
-        backbone_name: str = "convnext_base",
+        backbone_name: str = "convnext_small",
         pretrained: bool = True,
         num_classes_eligibility: int = 3,
         num_classes_pathology: int = 2,

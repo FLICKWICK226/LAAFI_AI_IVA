@@ -65,29 +65,42 @@ def calculate_clinical_metrics(y_true: np.ndarray, y_prob: np.ndarray, threshold
         "tp": int(tp), "tn": int(tn), "fp": int(fp), "fn": int(fn)
     }
 
-def evaluate_threshold_grid(y_true: np.ndarray, y_prob: np.ndarray, min_t: float = 0.10, max_t: float = 0.90, step: float = 0.01):
+def evaluate_threshold_grid(
+    y_true: np.ndarray,
+    y_prob: np.ndarray,
+    min_t: float = 0.05,
+    max_t: float = 0.95,
+    step: float = 0.01,
+    target_sensitivity: float = 0.95,
+    min_specificity: float = 0.50
+):
     """
-    Pilier 1 (Action 1.1) : Balayage fin du seuil T dans [0.10, 0.90] par pas de 0.01
-    pour trouver le compromis optimal (Sensibilité >= 95.0% et Spécificité maximale >= 80.0%).
-    Évite les angles morts dus au décalage de probabilité de la FocalLoss (alpha=0.75).
+    Balayage fin et débridé du seuil T dans [min_t, max_t] par pas de 0.01
+    pour trouver le compromis optimal clinique SaMD :
+    - Objectif 1 : Sensibilité >= target_sensitivity (défaut 95.0%) ET Spécificité >= min_specificity (défaut 50.0%)
+    - Si possible, maximise la spécificité pour réduire les faux positifs colposcopiques.
+    - Calcule également l'Indice de Youden J = Sensibilité + Spécificité - 1.
     """
     grid_results = []
-    best_item = None
-    target_recall = 0.95
-
     thresholds = np.arange(min_t, max_t + step / 2.0, step)
+    
     for t in thresholds:
         m = calculate_clinical_metrics(y_true, y_prob, threshold=float(t))
+        m['youden_index'] = float(m['sensitivity'] + m['specificity'] - 1.0)
         grid_results.append(m)
-        
-        # Sélection du meilleur point : Sensibilité >= 95% avec Spécificité maximale
-        if m['sensitivity'] >= target_recall:
-            if best_item is None or m['specificity'] > best_item['specificity']:
-                best_item = m
 
-    if best_item is None and len(grid_results) > 0:
-        # Fallback sur le meilleur F2 score
-        best_item = max(grid_results, key=lambda x: x['f2_score'])
+    # 1. Candidats idéaux (Sensibilité >= target ET Spécificité >= min_spec)
+    ideal_candidates = [m for m in grid_results if m['sensitivity'] >= target_sensitivity and m['specificity'] >= min_specificity]
+    if ideal_candidates:
+        best_item = max(ideal_candidates, key=lambda x: (x['specificity'], x['youden_index']))
+    else:
+        # 2. Candidats respectant le rappel cible, en maximisant la spécificité disponible
+        recall_candidates = [m for m in grid_results if m['sensitivity'] >= target_sensitivity]
+        if recall_candidates:
+            best_item = max(recall_candidates, key=lambda x: x['specificity'])
+        else:
+            # 3. Fallback sur le meilleur Indice de Youden ou F2
+            best_item = max(grid_results, key=lambda x: (x['youden_index'], x['f2_score'])) if grid_results else None
 
     return {
         "grid": grid_results,

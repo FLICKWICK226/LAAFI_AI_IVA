@@ -18,6 +18,9 @@ ttach>=0.0.3
 grad-cam>=1.4.8
 onnx>=1.14.0
 onnxruntime>=1.15.0
+imagehash>=4.3.1
+Pillow>=9.0.0
 noise>=1.2.2
 tqdm>=4.65.0
 pytest>=7.4.0
+

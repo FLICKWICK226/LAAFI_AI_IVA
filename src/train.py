@@ -348,16 +348,26 @@ def train_laafi_ai_model(config_path: str = "./config/config.yaml") -> None:
         
         if len(val_targets) > 0 and len(np.unique(val_targets)) > 1:
             t_cfg = cfg['stage2_classifier'].get('threshold_calibration', {})
-            min_t = t_cfg.get('min_t', 0.25)
-            max_t = t_cfg.get('max_t', 0.45)
-            step_t = t_cfg.get('step', 0.01)
+            min_t = float(t_cfg.get('min_t', 0.05))
+            max_t = float(t_cfg.get('max_t', 0.95))
+            step_t = float(t_cfg.get('step', 0.01))
+            target_sens = float(t_cfg.get('target_sensitivity', 0.95))
+            min_spec = float(t_cfg.get('min_specificity', 0.50))
             
-            grid_res = evaluate_threshold_grid(val_targets, val_probs, min_t=min_t, max_t=max_t, step=step_t)
+            grid_res = evaluate_threshold_grid(
+                val_targets,
+                val_probs,
+                min_t=min_t,
+                max_t=max_t,
+                step=step_t,
+                target_sensitivity=target_sens,
+                min_specificity=min_spec
+            )
             if grid_res['optimal']:
                 best_metrics = grid_res['optimal']
                 best_threshold = best_metrics['threshold']
 
-        print(f"📊 Epoch {epoch} Terminée | Loss: {train_loss:.4f} | Val AUC: {best_metrics['auc_roc']:.4f} | Sensibilité: {best_metrics['sensitivity']*100:.1f}% | Spécificité: {best_metrics.get('specificity', 0)*100:.1f}% | Score F2: {best_metrics.get('f2_score', 0):.4f} (Seuil Optimal T: {best_threshold:.2f})")
+        print(f"📊 Epoch {epoch} Terminée | Loss: {train_loss:.4f} | Val AUC: {best_metrics['auc_roc']:.4f} | Sensibilité: {best_metrics['sensitivity']*100:.1f}% | Spécificité: {best_metrics.get('specificity', 0)*100:.1f}% | Youden J: {best_metrics.get('youden_index', 0):.4f} | Score F2: {best_metrics.get('f2_score', 0):.4f} (Seuil Optimal T: {best_threshold:.2f})")
 
 
         # Mise à jour des rapports d'entraînement

@@ -19,7 +19,8 @@ class ONNXWrapper(nn.Module):
 def export_model_to_onnx(
     checkpoint_path: str = "./models/checkpoints/best_model.pt",
     output_onnx_path: str = "./models/exported/best_model.onnx",
-    img_size: tuple = (384, 384)
+    img_size: tuple = (224, 224),
+    backbone_name: str = None
 ) -> None:
     """
     Exporte le modèle Stage 2 entraîné au format ONNX pour l'inférence optimisée.
@@ -27,6 +28,25 @@ def export_model_to_onnx(
     os.makedirs(os.path.dirname(os.path.abspath(output_onnx_path)), exist_ok=True)
     device = torch.device("cpu")
     
+    # Résolution dynamique du backbone depuis la config si non spécifié
+    if backbone_name is None:
+        backbone_name = "convnext_small"
+        config_candidates = [
+            "./config/config.yaml",
+            "/kaggle/working/LAAFI_AI_IVA/config/config.yaml",
+            "../config/config.yaml"
+        ]
+        for cfg_path in config_candidates:
+            if os.path.exists(cfg_path):
+                try:
+                    import yaml
+                    with open(cfg_path, 'r', encoding='utf-8') as f_cfg:
+                        cfg = yaml.safe_load(f_cfg)
+                        backbone_name = cfg.get('stage2_classifier', {}).get('backbone', 'convnext_small')
+                        break
+                except Exception:
+                    pass
+
     # Résolution multi-chemins du checkpoint
     candidate_paths = [
         checkpoint_path,
@@ -41,7 +61,7 @@ def export_model_to_onnx(
             resolved_checkpoint = path
             break
 
-    model = IVALesionClassifierStage2(pretrained=False)
+    model = IVALesionClassifierStage2(backbone_name=backbone_name, pretrained=False)
     
     if resolved_checkpoint:
         try:
