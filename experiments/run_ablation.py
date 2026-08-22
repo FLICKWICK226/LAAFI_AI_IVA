@@ -5,7 +5,7 @@ import yaml
 import numpy as np
 import torch
 import torch.nn as nn
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, WeightedRandomSampler
 from tqdm import tqdm
 
 # Ajout du chemin projet au sys.path
@@ -138,11 +138,6 @@ def run_ablation_experiment(
     val_ds = IVADataset(csv_file=val_csv, is_train=False)
     test_ds = IVADataset(csv_file=test_csv, is_train=False)
 
-    batch_size = int(cfg['stage2_classifier'].get('batch_size', 16))
-    train_loader = DataLoader(train_ds, batch_size=batch_size, shuffle=True, num_workers=2, pin_memory=True)
-    val_loader = DataLoader(val_ds, batch_size=batch_size, shuffle=False, num_workers=2)
-    test_loader = DataLoader(test_ds, batch_size=batch_size, shuffle=False, num_workers=2)
-
     # Calcul dynamique des poids de classe pour corriger le déséquilibre (Type 1 minoritaire)
     if hasattr(train_ds, 'df') and 'target' in train_ds.df.columns:
         train_labels = train_ds.df['target'].values
@@ -158,6 +153,25 @@ def run_ablation_experiment(
     class_weights_tensor = torch.tensor(class_weights, dtype=torch.float32, device=device)
     criterion_weighted_ce = nn.CrossEntropyLoss(weight=class_weights_tensor)
     print(f"⚖️  Poids de classe automatiques : Type 1 = {class_weights[0]:.2f} | Type 2 = {class_weights[1]:.2f} | Type 3 = {class_weights[2]:.2f} (Effectifs : Type 1={class_counts[0]}, Type 2={class_counts[1]}, Type 3={class_counts[2]})")
+
+    # WeightedRandomSampler pour forcer un ratio 1:1:1 par batch entre Type 1, Type 2 et Type 3
+    sample_weights = [class_weights[int(t)] for t in train_labels]
+    sampler = WeightedRandomSampler(
+        weights=torch.as_tensor(sample_weights, dtype=torch.double),
+        num_samples=len(sample_weights),
+        replacement=True
+    )
+
+    batch_size = int(cfg['stage2_classifier'].get('batch_size', 16))
+    train_loader = DataLoader(
+        train_ds,
+        batch_size=batch_size,
+        sampler=sampler,
+        num_workers=2,
+        pin_memory=True
+    )
+    val_loader = DataLoader(val_ds, batch_size=batch_size, shuffle=False, num_workers=2)
+    test_loader = DataLoader(test_ds, batch_size=batch_size, shuffle=False, num_workers=2)
 
     # Boucle d'entraînement avec reprise
     for epoch in range(start_epoch, epochs + 1):

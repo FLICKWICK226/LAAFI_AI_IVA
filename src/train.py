@@ -7,7 +7,7 @@ import numpy as np
 import pandas as pd
 import torch
 import torch.nn as nn
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, WeightedRandomSampler
 from tqdm import tqdm
 
 # Anti-fragmentation mémoire VRAM CUDA
@@ -143,14 +143,36 @@ def train_laafi_ai_model(config_path: str = "./config/config.yaml") -> None:
     batch_size = cfg['stage2_classifier']['batch_size']
     accum_steps = cfg['stage2_classifier'].get('gradient_accumulation_steps', 2)
 
-    train_loader = DataLoader(
-        train_dataset,
-        batch_size=batch_size,
-        shuffle=True,
-        num_workers=num_workers,
-        pin_memory=pin_memory,
-        persistent_workers=(num_workers > 0)
-    )
+    # Calcul des poids d'échantillonnage 1:1:1 pour éliminer le déséquilibre de classe
+    if hasattr(train_dataset, 'df') and 'target' in train_dataset.df.columns and len(train_dataset.df) > 0:
+        train_labels = train_dataset.df['target'].values
+        class_counts = np.bincount(train_labels, minlength=3)
+        total_samples = len(train_labels)
+        class_weights = total_samples / (3.0 * np.maximum(class_counts, 1).astype(float))
+        sample_weights = [class_weights[int(t)] for t in train_labels]
+        sampler = WeightedRandomSampler(
+            weights=torch.as_tensor(sample_weights, dtype=torch.double),
+            num_samples=len(sample_weights),
+            replacement=True
+        )
+        train_loader = DataLoader(
+            train_dataset,
+            batch_size=batch_size,
+            sampler=sampler,
+            num_workers=num_workers,
+            pin_memory=pin_memory,
+            persistent_workers=(num_workers > 0)
+        )
+    else:
+        train_loader = DataLoader(
+            train_dataset,
+            batch_size=batch_size,
+            shuffle=True,
+            num_workers=num_workers,
+            pin_memory=pin_memory,
+            persistent_workers=(num_workers > 0)
+        )
+
     val_loader = DataLoader(
         val_dataset,
         batch_size=batch_size,
