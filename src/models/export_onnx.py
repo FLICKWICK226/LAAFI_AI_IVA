@@ -3,19 +3,6 @@ import torch
 import torch.nn as nn
 from src.models.classifier_lesion import IVALesionClassifierStage2
 
-class ONNXWrapper(nn.Module):
-    """
-    Wrapper pour convertir la sortie dictionnaire du modèle multi-tâche en tuple 
-    compatible avec l'exportateur ONNX natif.
-    """
-    def __init__(self, model: nn.Module):
-        super().__init__()
-        self.model = model
-
-    def forward(self, x: torch.Tensor):
-        outputs = self.model(x)
-        return outputs['eligibility'], outputs['pathology']
-
 def export_model_to_onnx(
     checkpoint_path: str = "./models/checkpoints/best_model.pt",
     output_onnx_path: str = "./models/exported/best_model.onnx",
@@ -23,7 +10,7 @@ def export_model_to_onnx(
     backbone_name: str = None
 ) -> None:
     """
-    Exporte le modèle Stage 2 entraîné au format ONNX pour l'inférence optimisée.
+    Exporte le modèle Stage 2 Unifié (Single-Head 3-Classes) au format ONNX pour inférence mobile.
     """
     os.makedirs(os.path.dirname(os.path.abspath(output_onnx_path)), exist_ok=True)
     device = torch.device("cpu")
@@ -61,7 +48,7 @@ def export_model_to_onnx(
             resolved_checkpoint = path
             break
 
-    model = IVALesionClassifierStage2(backbone_name=backbone_name, pretrained=False)
+    model = IVALesionClassifierStage2(backbone_name=backbone_name, pretrained=False, num_classes=3)
     
     if resolved_checkpoint:
         try:
@@ -81,29 +68,37 @@ def export_model_to_onnx(
         print("⚠️ Aucun checkpoint trouvé, exportation du modèle non entraîné à des fins de structure.")
 
     model.eval()
-    onnx_model = ONNXWrapper(model)
-    onnx_model.eval()
-    
     dummy_input = torch.randn(1, 3, img_size[0], img_size[1])
 
-    # Utilisation de l'exportateur ONNX classique (dynamo=False pour éviter la dépendance obligatoire à onnxscript)
     export_kwargs = {
         "export_params": True,
         "opset_version": 14,
         "do_constant_folding": True,
         "input_names": ['input_crop'],
-        "output_names": ['logits_eligibility', 'logits_pathology'],
-        "dynamic_axes": {'input_crop': {0: 'batch_size'}}
+        "output_names": ['logits'],
+        "dynamic_axes": {
+            'input_crop': {0: 'batch_size'},
+            'logits': {0: 'batch_size'}
+        }
     }
     
-    # Test support du paramètre dynamo (PyTorch 2.0+)
     try:
-        torch.onnx.export(onnx_model, dummy_input, output_onnx_path, dynamo=False, **export_kwargs)
+        torch.onnx.export(
+            model,
+            dummy_input,
+            output_onnx_path,
+            dynamo=False,
+            **export_kwargs
+        )
     except TypeError:
-        torch.onnx.export(onnx_model, dummy_input, output_onnx_path, **export_kwargs)
+        torch.onnx.export(
+            model,
+            dummy_input,
+            output_onnx_path,
+            **export_kwargs
+        )
 
-    print(f"🎉 Modèle exporté au format ONNX avec succès dans : {output_onnx_path}")
+    print(f"🎉 Modèle Stage 2 Unifié exporté avec succès en ONNX -> {output_onnx_path}")
 
 if __name__ == "__main__":
     export_model_to_onnx()
-

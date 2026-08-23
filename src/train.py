@@ -23,7 +23,6 @@ importlib.reload(src.data.dataset)
 from src.data.dataset import IVADataset
 from src.models.classifier_lesion import IVALesionClassifierStage2
 from src.utils.metrics import calculate_clinical_metrics, evaluate_threshold_grid
-from src.losses.asymmetric_loss import AsymmetricFocalLoss
 
 def fast_sync_to_ssd(src_dir: str, dst_dir: str) -> None:
     """
@@ -33,7 +32,6 @@ def fast_sync_to_ssd(src_dir: str, dst_dir: str) -> None:
     if not os.path.exists(src_dir):
         return
 
-    # Si le dossier destination existe déjà avec des fichiers, vérifier si la copie est déjà effectuée
     if os.path.exists(dst_dir):
         src_files_count = sum([len(files) for _, _, files in os.walk(src_dir)])
         dst_files_count = sum([len(files) for _, _, files in os.walk(dst_dir)])
@@ -43,7 +41,6 @@ def fast_sync_to_ssd(src_dir: str, dst_dir: str) -> None:
 
     os.makedirs(dst_dir, exist_ok=True)
     
-    # Collecte de la liste complète des fichiers à copier pour la barre de progression
     all_files_to_copy = []
     for root, _, files in os.walk(src_dir):
         for f in files:
@@ -66,7 +63,7 @@ def fast_sync_to_ssd(src_dir: str, dst_dir: str) -> None:
 
 def train_laafi_ai_model(config_path: str = "./config/config.yaml") -> None:
     """
-    Moteur d'entraînement principal pour Stage 2 (CADx) avec suivi de progression en temps réel (Live Progress).
+    Moteur d'entraînement unifié (Single-Head 3-Classes) pour Stage 2 (CADx).
     """
     print("\n" + "="*70)
     print("🚀 STEP [1/6] : Chargement de la configuration & Graine aléatoire...")
@@ -91,7 +88,6 @@ def train_laafi_ai_model(config_path: str = "./config/config.yaml") -> None:
         fast_data_dir = "/content/data_fast"
         fast_sync_to_ssd(drive_data_dir, fast_data_dir)
 
-    # Détection et résolution dynamique des dossiers Kaggle / Colab
     processed_dir = cfg['paths']['processed_data_dir']
     masks_dir = cfg['paths']['synthetic_masks_dir']
     checkpoints_dir = cfg['paths']['checkpoints_dir']
@@ -141,10 +137,11 @@ def train_laafi_ai_model(config_path: str = "./config/config.yaml") -> None:
     )
 
     batch_size = cfg['stage2_classifier']['batch_size']
-    accum_steps = cfg['stage2_classifier'].get('gradient_accumulation_steps', 2)
+    accum_steps = cfg['stage2_classifier'].get('gradient_accumulation_steps', 1)
+    use_weighted_sampler = cfg['stage2_classifier'].get('use_weighted_sampler', False)
 
-    # Calcul des poids d'échantillonnage 1:1:1 pour éliminer le déséquilibre de classe
-    if hasattr(train_dataset, 'df') and 'target' in train_dataset.df.columns and len(train_dataset.df) > 0:
+    # Échantillonnage naturel (ou pondéré doux si explicitement activé)
+    if use_weighted_sampler and hasattr(train_dataset, 'df') and 'target' in train_dataset.df.columns and len(train_dataset.df) > 0:
         train_labels = train_dataset.df['target'].values
         class_counts = np.bincount(train_labels, minlength=3)
         total_samples = len(train_labels)
@@ -188,15 +185,14 @@ def train_laafi_ai_model(config_path: str = "./config/config.yaml") -> None:
         raise ValueError(f"❌ Le dataset d'entraînement est vide (0 échantillon dans {train_csv_path}). Veuillez ré-exécuter la Cellule 4 (generate_patient_clusters_and_splits).")
 
     print("\n" + "="*70)
-    print(f"🚀 STEP [4/6] : Initialisation du Modèle ({cfg['stage2_classifier']['backbone']})...")
+    print(f"🚀 STEP [4/6] : Initialisation du Modèle Unifié ({cfg['stage2_classifier']['backbone']})...")
     print("="*70)
 
     raw_model = IVALesionClassifierStage2(
         backbone_name=cfg['stage2_classifier']['backbone'],
         pretrained=True,
-        num_classes_eligibility=3,
-        num_classes_pathology=2,
-        drop_rate=float(cfg['stage2_classifier'].get('drop_rate', 0.4))
+        num_classes=int(cfg['stage2_classifier'].get('num_classes', 3)),
+        drop_rate=float(cfg['stage2_classifier'].get('drop_rate', 0.2))
     ).to(device)
 
     model = raw_model
@@ -207,23 +203,18 @@ def train_laafi_ai_model(config_path: str = "./config/config.yaml") -> None:
         except Exception as e_comp:
             print(f"⚠️ Remarque torch.compile non appliqué : {e_comp}")
 
-    criterion_eligibility = nn.CrossEntropyLoss()
-    criterion_pathology_warmup = nn.CrossEntropyLoss()
-    criterion_pathology_asl = AsymmetricFocalLoss(
-        gamma_pos=float(cfg['stage2_classifier'].get('asl_gamma_pos', 1.0)),
-        gamma_neg=float(cfg['stage2_classifier'].get('asl_gamma_neg', 4.0)),
-        clip=float(cfg['stage2_classifier'].get('asl_clip', 0.05))
-    )
+    # Fonction de coût unifiée et symétrique avec label smoothing
+    label_smoothing = float(cfg['stage2_classifier'].get('label_smoothing', 0.05))
+    criterion = nn.CrossEntropyLoss(label_smoothing=label_smoothing)
     
-    # Optimizer avec Differential Learning Rate (Backbone à 1e-4, Têtes à 1e-3)
+    # Optimizer avec Differential Learning Rate (Backbone à 1e-4, Tête à 1e-3)
     backbone_lr = float(cfg['stage2_classifier'].get('learning_rate', 1e-4))
     head_lr = float(cfg['stage2_classifier'].get('head_learning_rate', 1e-3))
     weight_decay = float(cfg['stage2_classifier'].get('weight_decay', 1e-4))
 
     optimizer = torch.optim.AdamW([
         {'params': raw_model.backbone.parameters(), 'lr': backbone_lr},
-        {'params': raw_model.head_pathology.parameters(), 'lr': head_lr},
-        {'params': raw_model.head_eligibility.parameters(), 'lr': head_lr}
+        {'params': raw_model.head.parameters(), 'lr': head_lr}
     ], weight_decay=weight_decay)
     
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
@@ -232,11 +223,12 @@ def train_laafi_ai_model(config_path: str = "./config/config.yaml") -> None:
     )
     
     scaler = torch.amp.GradScaler('cuda', enabled=(device.type == 'cuda'))
+    best_val_loss = float('inf')
     best_val_auc = 0.0
     start_epoch = 1
     no_improve_epochs = 0
 
-    warmup_epochs = cfg['stage2_classifier'].get('warmup_epochs', 3)
+    warmup_epochs = cfg['stage2_classifier'].get('warmup_epochs', 2)
     patience = cfg['stage2_classifier'].get('early_stopping_patience', 5)
 
     print("\n" + "="*70)
@@ -255,8 +247,9 @@ def train_laafi_ai_model(config_path: str = "./config/config.yaml") -> None:
                 scaler.load_state_dict(checkpoint['scaler_state_dict'])
             start_epoch = checkpoint['epoch'] + 1
             best_val_auc = checkpoint.get('best_val_auc', 0.0)
+            best_val_loss = checkpoint.get('best_val_loss', float('inf'))
             no_improve_epochs = checkpoint.get('no_improve_epochs', 0)
-            print(f"✅ Reprise réussie à l'epoch {start_epoch} (Meilleur Val AUC : {best_val_auc:.4f})")
+            print(f"✅ Reprise réussie à l'epoch {start_epoch} (Meilleur Val AUC : {best_val_auc:.4f}, Val Loss : {best_val_loss:.4f})")
         except Exception as e_res:
             print(f"⚠️ Checkpoint incompatible ou corrompu ({e_res}). Démarrage d'un nouvel entraînement.")
 
@@ -272,14 +265,14 @@ def train_laafi_ai_model(config_path: str = "./config/config.yaml") -> None:
 
     for epoch in range(start_epoch, cfg['stage2_classifier']['epochs'] + 1):
         
-        # LEVIER 5 : Warmup Backbone Freeze
+        # Warmup Backbone Freeze
         if epoch <= warmup_epochs:
-            print(f"🔒 LEVIER 5 : Epoch {epoch}/{warmup_epochs} - Backbone gelé (Warmup).")
+            print(f"🔒 Epoch {epoch}/{warmup_epochs} - Backbone gelé (Warmup tête de classification).")
             for param in raw_model.backbone.parameters():
                 param.requires_grad = False
         else:
             if epoch == warmup_epochs + 1:
-                print("🔓 LEVIER 5 : Phase de warmup terminée ! Déblocage des poids du backbone.")
+                print("🔓 Phase de warmup terminée ! Déblocage des poids du backbone ConvNeXt.")
             for param in raw_model.backbone.parameters():
                 param.requires_grad = True
 
@@ -287,20 +280,15 @@ def train_laafi_ai_model(config_path: str = "./config/config.yaml") -> None:
         train_loss = 0.0
         optimizer.zero_grad()
 
-        # Choix de la loss pathologique : Warmup initial vs Asymmetric Focal Loss
-        active_criterion_patho = criterion_pathology_warmup if epoch <= warmup_epochs else criterion_pathology_asl
-
         pbar = tqdm(train_loader, desc=f"Epoch {epoch}/{cfg['stage2_classifier']['epochs']}", unit="batch")
         for step, (images, targets, _) in enumerate(pbar):
             images = images.to(device, non_blocking=True)
             targets = targets.to(device, non_blocking=True)
 
             with torch.amp.autocast('cuda', enabled=(device.type == 'cuda')):
-                outputs = model(images)
-                loss_elig = criterion_eligibility(outputs['eligibility'], targets)
-                targets_patho = (targets > 0).long()
-                loss_patho = active_criterion_patho(outputs['pathology'], targets_patho)
-                total_loss = (loss_elig + 2.0 * loss_patho) / accum_steps
+                logits = model(images)
+                loss = criterion(logits, targets)
+                total_loss = loss / accum_steps
 
             scaler.scale(total_loss).backward()
 
@@ -312,7 +300,6 @@ def train_laafi_ai_model(config_path: str = "./config/config.yaml") -> None:
             train_loss += total_loss.item() * accum_steps
             pbar.set_postfix({"Loss": f"{total_loss.item() * accum_steps:.4f}"})
 
-            # Fichier de statut live
             if step % 10 == 0 or step == len(train_loader) - 1:
                 live_info = {
                     "status": "training",
@@ -330,20 +317,28 @@ def train_laafi_ai_model(config_path: str = "./config/config.yaml") -> None:
 
         # Phase de Validation
         model.eval()
+        val_loss = 0.0
         val_targets, val_probs = [], []
         with torch.no_grad():
             for images, targets, _ in tqdm(val_loader, desc=f"Validation Epoch {epoch}", leave=False):
                 images = images.to(device, non_blocking=True)
+                targets = targets.to(device, non_blocking=True)
                 with torch.amp.autocast('cuda', enabled=(device.type == 'cuda')):
-                    outputs = model(images)
-                    probs = torch.softmax(outputs['pathology'], dim=1)[:, 1]
-                val_targets.extend((targets > 0).cpu().numpy())
-                val_probs.extend(probs.cpu().numpy())
+                    logits = model(images)
+                    loss_v = criterion(logits, targets)
+                    probs = torch.softmax(logits, dim=1) # [B, 3]
 
+                val_loss += loss_v.item() * len(targets)
+                # Probabilité clinique de positivité (Type 2 Lésionnel + Type 3 Invalide/Suspect = 1 - Type 1)
+                prob_positive = (probs[:, 1] + probs[:, 2]).cpu().numpy()
+                val_targets.extend((targets > 0).cpu().numpy())
+                val_probs.extend(prob_positive)
+
+        val_loss /= len(val_dataset) if len(val_dataset) > 0 else 1
         val_targets = np.array(val_targets)
         val_probs = np.array(val_probs)
         
-        best_threshold = 0.38
+        best_threshold = 0.50
         best_metrics = {"auc_roc": 0.5, "sensitivity": 0.0, "specificity": 0.0, "f2_score": 0.0}
         
         if len(val_targets) > 0 and len(np.unique(val_targets)) > 1:
@@ -367,8 +362,7 @@ def train_laafi_ai_model(config_path: str = "./config/config.yaml") -> None:
                 best_metrics = grid_res['optimal']
                 best_threshold = best_metrics['threshold']
 
-        print(f"📊 Epoch {epoch} Terminée | Loss: {train_loss:.4f} | Val AUC: {best_metrics['auc_roc']:.4f} | Sensibilité: {best_metrics['sensitivity']*100:.1f}% | Spécificité: {best_metrics.get('specificity', 0)*100:.1f}% | Youden J: {best_metrics.get('youden_index', 0):.4f} | Score F2: {best_metrics.get('f2_score', 0):.4f} (Seuil Optimal T: {best_threshold:.2f})")
-
+        print(f"📊 Epoch {epoch} Terminée | Train Loss: {train_loss:.4f} | Val Loss: {val_loss:.4f} | Val AUC: {best_metrics['auc_roc']:.4f} | Sensibilité: {best_metrics['sensitivity']*100:.1f}% | Spécificité: {best_metrics.get('specificity', 0)*100:.1f}% | Youden J: {best_metrics.get('youden_index', 0):.4f} | Score F2: {best_metrics.get('f2_score', 0):.4f} (Seuil Optimal T: {best_threshold:.2f})")
 
         # Mise à jour des rapports d'entraînement
         os.makedirs(reports_dir, exist_ok=True)
@@ -377,6 +371,7 @@ def train_laafi_ai_model(config_path: str = "./config/config.yaml") -> None:
         epoch_log = {
             "epoch": epoch,
             "train_loss": float(train_loss),
+            "val_loss": float(val_loss),
             "val_auc": float(best_metrics['auc_roc']),
             "val_sensitivity": float(best_metrics['sensitivity']),
             "val_specificity": float(best_metrics.get('specificity', 0.0)),
@@ -403,21 +398,25 @@ def train_laafi_ai_model(config_path: str = "./config/config.yaml") -> None:
         with open(json_report_path, 'w', encoding='utf-8') as f_json:
             json.dump(history, f_json, indent=4)
 
-        # LEVIER 1 : Early Stopping & Checkpoints
-        if best_metrics['auc_roc'] > best_val_auc:
-            best_val_auc = best_metrics['auc_roc']
+        # Checkpointing sur Validation AUC et Validation Loss
+        is_best = False
+        if best_metrics['auc_roc'] > best_val_auc or (abs(best_metrics['auc_roc'] - best_val_auc) < 0.005 and val_loss < best_val_loss):
+            is_best = True
+            best_val_auc = max(best_val_auc, best_metrics['auc_roc'])
+            best_val_loss = min(best_val_loss, val_loss)
             no_improve_epochs = 0
             best_path = os.path.join(checkpoints_dir, "best_model.pt")
             torch.save({
                 'epoch': epoch,
                 'model_state_dict': raw_model.state_dict(),
                 'best_threshold': best_threshold,
-                'val_auc': best_val_auc
+                'val_auc': best_val_auc,
+                'val_loss': best_val_loss
             }, best_path)
-            print(f"💾 LEVIER 1 : Nouveau meilleur Val AUC ({best_val_auc:.4f}) -> Modèle sauvegardé !")
+            print(f"💾 Nouveau meilleur modèle (Val AUC: {best_val_auc:.4f}, Val Loss: {best_val_loss:.4f}) -> {best_path} sauvegardé !")
         else:
             no_improve_epochs += 1
-            print(f"⏳ AUC non amélioré depuis {no_improve_epochs}/{patience} epoch(s).")
+            print(f"⏳ Pas d'amélioration depuis {no_improve_epochs}/{patience} epoch(s).")
 
         latest_dict = {
             'epoch': epoch,
@@ -427,13 +426,14 @@ def train_laafi_ai_model(config_path: str = "./config/config.yaml") -> None:
             'scaler_state_dict': scaler.state_dict() if scaler else None,
             'best_threshold': best_threshold,
             'best_val_auc': best_val_auc,
+            'best_val_loss': best_val_loss,
             'no_improve_epochs': no_improve_epochs
         }
         torch.save(latest_dict, latest_checkpoint_path)
 
         if no_improve_epochs >= patience:
-            print(f"🛑 LEVIER 1 DÉCLENCHÉ : Arrêt précoce à l'epoch {epoch} (Aucune amélioration depuis {patience} epochs).")
-            print(f"🎯 Meilleur Val AUC obtenu : {best_val_auc:.4f}")
+            print(f"🛑 Arrêt précoce à l'epoch {epoch} (Patience de {patience} epochs atteinte).")
+            print(f"🎯 Meilleur Val AUC : {best_val_auc:.4f} | Meilleure Val Loss : {best_val_loss:.4f}")
             break
 
     if torch.cuda.is_available():

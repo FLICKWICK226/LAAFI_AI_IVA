@@ -7,18 +7,18 @@ import torch
 def generate_gradcam_heatmap(
     model: torch.nn.Module,
     image_tensor: torch.Tensor,
+    target_class: int = 1,
     target_layer: torch.nn.Module = None,
     output_path: str = None
 ) -> np.ndarray:
     """
     Génère une heatmap Grad-CAM pour vérifier que le réseau focalise son attention
-    sur les zones acéto-blanches de la JSC et non sur le métal ou le sang (Rule 6).
+    sur les zones acéto-blanches de la ZT et non sur le métal ou le sang (Rule 6).
     """
     if model is None:
-        # Fallback dummy heatmap if model is not loaded yet
-        heatmap = np.zeros((384, 384), dtype=np.float32)
+        heatmap = np.zeros((224, 224), dtype=np.float32)
         if output_path:
-            img_np = np.zeros((384, 384, 3), dtype=np.uint8)
+            img_np = np.zeros((224, 224, 3), dtype=np.uint8)
             save_gradcam_audit_figure(img_np, heatmap, output_path)
         return heatmap
 
@@ -31,15 +31,14 @@ def generate_gradcam_heatmap(
         elif hasattr(model, "backbone") and hasattr(model.backbone, "features"):
             target_layer = model.backbone.features[-1]
         else:
-            # Recherche de la dernière couche Conv2d dans le modèle
             conv_layers = [m for m in model.modules() if isinstance(m, torch.nn.Conv2d)]
             if conv_layers:
                 target_layer = conv_layers[-1]
 
     if target_layer is None:
-        heatmap = np.zeros((384, 384), dtype=np.float32)
+        heatmap = np.zeros((224, 224), dtype=np.float32)
         if output_path:
-            img_np = np.zeros((384, 384, 3), dtype=np.uint8)
+            img_np = np.zeros((224, 224, 3), dtype=np.uint8)
             save_gradcam_audit_figure(img_np, heatmap, output_path)
         return heatmap
 
@@ -66,9 +65,11 @@ def generate_gradcam_heatmap(
 
     outputs = model(input_tensor)
     if isinstance(outputs, dict) and 'pathology' in outputs:
-        target_score = outputs['pathology'][0, 1]
+        cls_idx = min(target_class, outputs['pathology'].shape[1] - 1)
+        target_score = outputs['pathology'][0, cls_idx]
     elif isinstance(outputs, torch.Tensor):
-        target_score = outputs[0, 1] if outputs.dim() > 1 else outputs[0]
+        cls_idx = min(target_class, outputs.shape[1] - 1) if outputs.dim() > 1 else 0
+        target_score = outputs[0, cls_idx] if outputs.dim() > 1 else outputs[0]
     else:
         target_score = outputs[0]
 

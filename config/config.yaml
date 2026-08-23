@@ -35,17 +35,20 @@ stage1_yolo:
 
 stage2_classifier:
   backbone: "convnext_small" # ou mobilenetv4_conv_medium, efficientnet_b0
-  num_classes: 3   # Tri-classes : Type 1 (0), Type 2 (1), Type 3 (2)
+  num_classes: 3   # Tri-classes unifiées : Type 1 (0), Type 2 (1), Type 3 (2)
   epochs: 20
   batch_size: 32   # Batch size 32 sur 224x224 passe parfaitement sans OOM
   gradient_accumulation_steps: 1
   warmup_epochs: 2
   early_stopping_patience: 5
+  early_stopping_metric: "val_loss" # ou val_auc
   learning_rate: 1.0e-4        # LR Backbone pré-entraîné
-  head_learning_rate: 1.0e-3   # LR Têtes de classification (10x plus élevé pour convergence rapide)
+  head_learning_rate: 1.0e-3   # LR Tête de classification unifiée
   weight_decay: 1.0e-4         # Régularisation modérée
   drop_rate: 0.2               # Dropout optimisé
-  loss_type: "cross_entropy"   # Multi-classes standard pour l'éligibilité anatomique
+  loss_type: "cross_entropy"   # Multi-classes symétrique pure
+  label_smoothing: 0.05        # Lissage pour éviter la sur-confiance des prédictions
+  use_weighted_sampler: false  # Distribution d'échantillonnage naturelle
   threshold_calibration:
     min_t: 0.05
     max_t: 0.95
@@ -59,6 +62,6 @@ augmentations:
   val_shift_limit: 0.25
   defocus_radius: [1, 4]
   motion_blur_limit: [3, 9]
-  perlin_noise_proba: 0.30
-  specular_flare_proba: 0.40  # Simulation des reflets spéculaires intenses de flash LED
+  perlin_noise_proba: 0.15     # Bruit modéré pour préserver la texture ZT
+  specular_flare_proba: 0.15   # Reflets réalistes modérés (évite la confusion avec l'acéto-blanchiment)
 

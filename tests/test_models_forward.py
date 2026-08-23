@@ -16,15 +16,14 @@ def test_student_mobilenetv4_forward():
     assert feat_map.ndim == 4, "La feature map doit être en 4D [B, C, H, W]."
 
 def test_stage2_classifier_forward():
-    """Vérifie la passe forward du classifieur Stage 2 multi-tâches en résolution 224x224."""
+    """Vérifie la passe forward du classifieur Stage 2 unifié à 3 classes en résolution 224x224."""
     from src.models.classifier_lesion import IVALesionClassifierStage2
-    model = IVALesionClassifierStage2(backbone_name="convnext_small", pretrained=False)
+    model = IVALesionClassifierStage2(backbone_name="convnext_small", pretrained=False, num_classes=3)
     dummy_input = torch.randn(2, 3, 224, 224)
 
     outputs = model(dummy_input)
-    assert "eligibility" in outputs and "pathology" in outputs
-    assert outputs["eligibility"].shape == (2, 3), f"Shape éligibilité inattendue : {outputs['eligibility'].shape}"
-    assert outputs["pathology"].shape == (2, 2), f"Shape pathologie inattendue : {outputs['pathology'].shape}"
+    assert isinstance(outputs, torch.Tensor), f"Type inattendu : {type(outputs)}"
+    assert outputs.shape == (2, 3), f"Shape logits inattendue : {outputs.shape} (attendu [2, 3])"
 
 def test_anatomical_and_triage_metrics():
     """Vérifie le bon calcul des métriques tri-classes et du moteur de triage SaMD."""
@@ -49,3 +48,24 @@ def test_anatomical_and_triage_metrics():
     assert triage["triage_accuracy"] == 1.0
     assert triage["sensitivity_eligible"] == 1.0
     assert triage["safety_specificity_type3"] == 1.0
+
+def test_export_onnx_single_head(tmp_path):
+    """Vérifie que l'exportation ONNX du modèle unifié fonctionne sans erreur."""
+    import os
+    import onnx
+    from src.models.export_onnx import export_model_to_onnx
+
+    output_onnx = str(tmp_path / "test_model.onnx")
+    export_model_to_onnx(
+        checkpoint_path=None,
+        output_onnx_path=output_onnx,
+        img_size=(224, 224),
+        backbone_name="convnext_small"
+    )
+
+    assert os.path.exists(output_onnx), "Le fichier ONNX n'a pas été créé."
+    onnx_proto = onnx.load(output_onnx)
+    onnx.checker.check_model(onnx_proto)
+    assert len(onnx_proto.graph.output) == 1, "Le modèle doit avoir exactement 1 sortie."
+    assert onnx_proto.graph.output[0].name == "logits"
+
