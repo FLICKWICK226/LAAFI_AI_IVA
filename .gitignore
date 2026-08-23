@@ -65,6 +65,9 @@ outputs/reports/*
 !outputs/reports/.gitkeep
 outputs/logs/*
 !outputs/logs/.gitkeep
+outputs/figures_extracted/
+outputs/pulled_notebooks/
+outputs/kaggle_remote*
 *.log
 .tensorboard/
 
