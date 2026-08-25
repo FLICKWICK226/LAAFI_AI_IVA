@@ -13,7 +13,14 @@ import argparse
 import base64
 from pathlib import Path
 
-if hasattr(sys.stdout, 'reconfigure'):
+if sys.platform == 'win32':
+    import io
+    try:
+        sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
+        sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
+    except Exception:
+        pass
+elif hasattr(sys.stdout, 'reconfigure'):
     try:
         sys.stdout.reconfigure(encoding='utf-8')
     except Exception:
@@ -158,7 +165,7 @@ def cmd_pull_outputs(args):
 
     print(f"📥 Téléchargement des outputs du kernel '{kernel_id}' vers {output_dir}...")
     try:
-        api.kernels_output(kernel_id, path=output_dir)
+        api.kernels_output(kernel_id, path=output_dir, force=True)
         downloaded = []
         for root, _, files in os.walk(output_dir):
             for f in files:

@@ -10,7 +10,7 @@ def build_master_kaggle_notebook():
                 "source": [
                     "# 🔬 LAAFI_AI IVA Engine - Master Pipeline Kaggle Native\n",
                     "**Projet :** Dépistage du Cancer du Col de l'Utérus par Imagerie Smartphone (IVA/VIA)\n",
-                    "**Spécifications :** SaMD Class II CADe/CADx | Target Recall >= 95.0% | Zero-Download Mode\n",
+                    "**Spécifications :** SaMD Class II CADe/CADx | Directives OMS / IFCPC | Zero-Download Mode\n",
                     "\n",
                     "---"
                 ]
@@ -19,7 +19,7 @@ def build_master_kaggle_notebook():
                 "cell_type": "markdown",
                 "metadata": {},
                 "source": [
-                    "## 📥 Cellule 1 : Initialisation & Mise à Jour Automatique du Dépôt GitHub\n",
+                    "## 📥 Cellule 1 : Initialisation & Synchronisation du Dépôt\n",
                     "Clonage ou mise à jour automatique (`git pull`) du code source et installation des dépendances."
                 ]
             },
@@ -31,7 +31,6 @@ def build_master_kaggle_notebook():
                 "source": [
                     "import os, sys\n",
                     "\n",
-                    "# 1. Clonage ou mise à jour automatique (git pull) du dépôt GitHub officiel dans /kaggle/working/\n",
                     "repo_path = \"/kaggle/working/LAAFI_AI_IVA\"\n",
                     "if not os.path.exists(repo_path):\n",
                     "    print(\"📥 Clonage initial du dépôt GitHub officiel...\")\n",
@@ -44,8 +43,8 @@ def build_master_kaggle_notebook():
                     "if repo_path not in sys.path:\n",
                     "    sys.path.append(repo_path)\n",
                     "\n",
-                    "# 2. Installation des dépendances nécessaires\n",
-                    "!pip install -q timm albumentations noise torchvision opencv-python-headless matplotlib pandas scikit-learn tqdm py7zr onnx onnxscript"
+                    "# Installation des dépendances\n",
+                    "!pip install -q timm albumentations opencv-python-headless matplotlib pandas scikit-learn tqdm py7zr onnx imagehash"
                 ]
             },
             {
@@ -69,10 +68,6 @@ def build_master_kaggle_notebook():
                     "    gpu_name = torch.cuda.get_device_name(0)\n",
                     "    vram_gb = torch.cuda.get_device_properties(0).total_memory / 1e9\n",
                     "    print(f\"🚀 GPU Kaggle Détecté : {gpu_name} ({vram_gb:.2f} GB VRAM)\")\n",
-                    "    if \"P100\" in gpu_name or torch.cuda.get_device_capability(0)[0] < 7:\n",
-                    "        print(\"\\n⚠️ ATTENTION HARDWARE : GPU Tesla P100 (sm_60) détecté !\")\n",
-                    "        print(\"👉 Veuillez basculer sur 'GPU T4 x2' dans le panneau de droite sur Kaggle (Settings -> Accelerator).\")\n",
-                    "        print(\"👉 Les GPU T4 (sm_75) sont 100% compatibles avec PyTorch 2.10+ et offrent 2x plus de puissance de calcul.\\n\")\n",
                     "else:\n",
                     "    print(\"⚠️ GPU non détecté. Assurez-vous d'activer l'accélérateur GPU dans le menu 'Settings' -> 'Accelerator' de Kaggle.\")\n",
                     "\n",
@@ -90,7 +85,7 @@ def build_master_kaggle_notebook():
                 "cell_type": "markdown",
                 "metadata": {},
                 "source": [
-                    "## 🎨 Cellule 3 : Génération Hors-ligne des 1 000 Masques Perlin\n",
+                    "## 🎨 Cellule 3 : Génération Hors-ligne des Masques Perlin\n",
                     "Pré-génération des masques de bruit procédural (sang et glaire) dans le dossier réscriptible `/kaggle/working/data/synthetic_masks`."
                 ]
             },
@@ -115,8 +110,8 @@ def build_master_kaggle_notebook():
                 "cell_type": "markdown",
                 "metadata": {},
                 "source": [
-                    "## 🔍 Cellule 4 : Indexation Native & Splits Patients Étanches\n",
-                    "Indexation universelle multi-chemins des 4 800+ images d'entrée depuis `/kaggle/input/` et découpage sans fuite de données."
+                    "## 🔍 Cellule 4 : Indexation Native & Splits Patients Étanches (Zéro Fuite)\n",
+                    "Indexation universelle multi-chemins des images d'entrée depuis `/kaggle/input/` et découpage sans fuite de données via dHash/aHash (Hamming <= 6)."
                 ]
             },
             {
@@ -140,8 +135,8 @@ def build_master_kaggle_notebook():
                 "cell_type": "markdown",
                 "metadata": {},
                 "source": [
-                    "## 🏋️ Cellule 5 : Entraînement Optimisé Stage 2 (ConvNeXt-Base)\n",
-                    "Lancement du moteur d'entraînement avec Précision Mixte (AMP), Warmup Backbone Freeze (3 epochs), Early Stopping (5 epochs) et Gradient Accumulation."
+                    "## 🏋️ Cellule 5 : Entraînement Optimisé Stage 2 (ConvNeXt-Small 3-Classes)\n",
+                    "Lancement du moteur d'entraînement unifié avec Précision Mixte (AMP), Warmup Backbone Freeze, Early Stopping et Gradient Accumulation."
                 ]
             },
             {
@@ -162,8 +157,8 @@ def build_master_kaggle_notebook():
                 "cell_type": "markdown",
                 "metadata": {},
                 "source": [
-                    "## 📊 Cellule 6 : Évaluation Aveugle & Exportation des Métriques (Matrice de Confusion, Courbe ROC, CSV)\n",
-                    "Génération et sauvegarde automatique des graphiques et rapports sous `/kaggle/working/outputs/`."
+                    "## 📊 Cellule 6 : Évaluation Réelle & Exportation des Métriques Biomédicales\n",
+                    "Évaluation du meilleur checkpoint sur le Test Set : Matrice de Confusion IFCPC 3-Classes, Courbe ROC Triage OMS et rapports CSV/JSON."
                 ]
             },
             {
@@ -173,10 +168,17 @@ def build_master_kaggle_notebook():
                 "outputs": [],
                 "source": [
                     "import os\n",
+                    "import json\n",
+                    "import torch\n",
                     "import numpy as np\n",
                     "import pandas as pd\n",
                     "import matplotlib.pyplot as plt\n",
+                    "from torch.utils.data import DataLoader\n",
                     "from sklearn.metrics import confusion_matrix, roc_curve, auc, ConfusionMatrixDisplay\n",
+                    "\n",
+                    "from src.data.dataset import IVADataset\n",
+                    "from src.models.classifier_lesion import IVALesionClassifierStage2\n",
+                    "from src.utils.metrics import calculate_anatomical_metrics, calculate_clinical_triage_metrics\n",
                     "\n",
                     "fig_dir = \"/kaggle/working/outputs/figures\"\n",
                     "rep_dir = \"/kaggle/working/outputs/reports\"\n",
@@ -199,55 +201,103 @@ def build_master_kaggle_notebook():
                     "    ax2.plot(df_hist['epoch'], df_hist['val_auc'], color='tab:blue', marker='s', label='Val AUC')\n",
                     "    ax2.plot(df_hist['epoch'], df_hist['val_f2_score'], color='tab:green', marker='^', label='Val F2')\n",
                     "    \n",
-                    "    plt.title(\"LAAFI_AI Kaggle Engine - Courbes d'Entraînement Finales\")\n",
+                    "    plt.title(\"LAAFI_AI Kaggle Engine - Courbes d'Entraînement\")\n",
                     "    fig.tight_layout()\n",
                     "    plt.savefig(os.path.join(fig_dir, \"learning_curves.png\"), dpi=150)\n",
                     "    plt.show()\n",
                     "    plt.close()\n",
                     "\n",
-                    "    y_true_demo = np.array([0]*60 + [1]*40)\n",
-                    "    y_pred_demo = np.array([0]*56 + [1]*4 + [0]*2 + [1]*38)\n",
-                    "    cm = confusion_matrix(y_true_demo, y_pred_demo)\n",
-                    "    disp = ConfusionMatrixDisplay(confusion_matrix=cm, display_labels=['Négatif (Sain)', 'Positif (Lésion)'])\n",
-                    "    \n",
-                    "    fig_cm, ax_cm = plt.subplots(figsize=(6, 5))\n",
-                    "    disp.plot(cmap=plt.cm.Blues, ax=ax_cm)\n",
-                    "    plt.title(\"Matrice de Confusion Clinique (Sensibilité >= 95.0%)\")\n",
-                    "    plt.savefig(os.path.join(fig_dir, \"confusion_matrix.png\"), dpi=150)\n",
-                    "    plt.show()\n",
-                    "    plt.close()\n",
-                    "    print(f\"🖼️ Matrice de confusion sauvegardée dans : {os.path.join(fig_dir, 'confusion_matrix.png')}\")\n",
+                    "# Évaluation aveugle sur le Test Set\n",
+                    "test_csv = \"/kaggle/working/data/processed/test.csv\"\n",
+                    "if not os.path.exists(test_csv):\n",
+                    "    test_csv = \"./data/processed/test.csv\"\n",
                     "\n",
-                    "    fpr, tpr, thresholds = roc_curve(y_true_demo, np.linspace(0.1, 0.9, len(y_true_demo)))\n",
-                    "    roc_auc_val = auc(fpr, tpr)\n",
-                    "    \n",
-                    "    plt.figure(figsize=(6, 5))\n",
-                    "    plt.plot(fpr, tpr, color='darkorange', lw=2, label=f'Courbe ROC (AUC = {roc_auc_val:.2f})')\n",
-                    "    plt.plot([0, 1], [0, 1], color='navy', lw=2, linestyle='--')\n",
-                    "    plt.axhline(y=0.95, color='r', linestyle=':', label='Seuil de Sécurité Clinique 95%')\n",
-                    "    plt.xlabel('Taux de Faux Positifs (1 - Spécificité)')\n",
-                    "    plt.ylabel('Taux de Vrais Positifs (Sensibilité)')\n",
-                    "    plt.title('Courbe ROC & Calibration du Seuil T')\n",
-                    "    plt.legend(loc=\"lower right\")\n",
-                    "    plt.savefig(os.path.join(fig_dir, \"roc_curve.png\"), dpi=150)\n",
-                    "    plt.show()\n",
-                    "    plt.close()\n",
-                    "    print(f\"📈 Courbe ROC sauvegardée dans : {os.path.join(fig_dir, 'roc_curve.png')}\")\n",
+                    "ckpt_path = \"/kaggle/working/models/checkpoints/best_model.pt\"\n",
+                    "if not os.path.exists(ckpt_path):\n",
+                    "    ckpt_path = \"./models/checkpoints/best_model.pt\"\n",
                     "\n",
-                    "    metrics_summary = pd.DataFrame([{\n",
-                    "        \"metric_name\": \"Sensibilité (Recall)\", \"target_clinical\": \">= 95.0%\", \"value\": \"95.0%\"\n",
-                    "    }, {\n",
-                    "        \"metric_name\": \"Spécificité\", \"target_clinical\": \">= 80.0%\", \"value\": \"93.3%\"\n",
-                    "    }, {\n",
-                    "        \"metric_name\": \"Score F2 (Pénalisation FN)\", \"target_clinical\": \">= 0.88\", \"value\": \"0.926\"\n",
-                    "    }, {\n",
-                    "        \"metric_name\": \"AUC-ROC\", \"target_clinical\": \">= 0.90\", \"value\": f\"{df_hist['val_auc'].max():.4f}\"\n",
-                    "    }])\n",
-                    "    metrics_csv_path = os.path.join(rep_dir, \"metrics_report.csv\")\n",
-                    "    metrics_summary.to_csv(metrics_csv_path, index=False)\n",
-                    "    print(f\"📄 Rapport de métriques CSV exporté dans : {metrics_csv_path}\")\n",
-                    "else:\n",
-                    "    print(\"ℹ️ Entraînement en cours ou non encore lancé.\")"
+                    "device = torch.device(\"cuda\" if torch.cuda.is_available() else \"cpu\")\n",
+                    "if os.path.exists(test_csv) and os.path.exists(ckpt_path):\n",
+                    "    test_ds = IVADataset(csv_file=test_csv, is_train=False)\n",
+                    "    if len(test_ds) > 0:\n",
+                    "        test_loader = DataLoader(test_ds, batch_size=32, shuffle=False)\n",
+                    "        model = IVALesionClassifierStage2(backbone_name=\"convnext_small\", pretrained=False, num_classes=3).to(device)\n",
+                    "        ckpt = torch.load(ckpt_path, map_location=device)\n",
+                    "        state_dict = ckpt.get('model_state_dict', ckpt)\n",
+                    "        clean_state = {k.replace(\"_orig_mod.\", \"\"): v for k, v in state_dict.items()}\n",
+                    "        model.load_state_dict(clean_state, strict=False)\n",
+                    "        model.eval()\n",
+                    "        \n",
+                    "        all_targets, all_probs = [], []\n",
+                    "        with torch.no_grad():\n",
+                    "            for imgs, targets, _ in test_loader:\n",
+                    "                imgs = imgs.to(device)\n",
+                    "                logits = model(imgs)\n",
+                    "                probs = torch.softmax(logits, dim=1).cpu().numpy()\n",
+                    "                all_probs.append(probs)\n",
+                    "                all_targets.append(targets.numpy())\n",
+                    "                \n",
+                    "        all_probs = np.vstack(all_probs)\n",
+                    "        all_targets = np.concatenate(all_targets)\n",
+                    "        \n",
+                    "        # 1. Métriques anatomiques IFCPC\n",
+                    "        anat_metrics = calculate_anatomical_metrics(all_targets, all_probs)\n",
+                    "        print(\"📋 Métriques Anatomiques (Type 1 / Type 2 / Type 3) :\")\n",
+                    "        print(f\"   • Accuracy globale : {anat_metrics['accuracy']*100:.2f}%\")\n",
+                    "        print(f\"   • Macro F1-Score   : {anat_metrics['macro_f1']:.4f}\")\n",
+                    "        print(f\"   • Macro AUC-ROC    : {anat_metrics['macro_auc_roc']:.4f}\")\n",
+                    "        \n",
+                    "        cm = np.array(anat_metrics['confusion_matrix'])\n",
+                    "        disp = ConfusionMatrixDisplay(confusion_matrix=cm, display_labels=['Type 1', 'Type 2', 'Type 3'])\n",
+                    "        fig_cm, ax_cm = plt.subplots(figsize=(6, 5))\n",
+                    "        disp.plot(cmap=plt.cm.Blues, ax=ax_cm)\n",
+                    "        plt.title(\"Matrice de Confusion Anatomique 3-Classes (IFCPC)\")\n",
+                    "        plt.savefig(os.path.join(fig_dir, \"confusion_matrix.png\"), dpi=150)\n",
+                    "        plt.show()\n",
+                    "        plt.close()\n",
+                    "        \n",
+                    "        # 2. Triage Clinique SaMD (Directives OMS)\n",
+                    "        triage_metrics = calculate_clinical_triage_metrics(all_targets, all_probs, referral_threshold=0.35)\n",
+                    "        print(\"\\n🚦 Moteur de Triage Clinique SaMD (Directives OMS) :\")\n",
+                    "        print(f\"   • Triage Accuracy          : {triage_metrics['triage_accuracy']*100:.2f}%\")\n",
+                    "        print(f\"   • Sensibilité Éligibles    : {triage_metrics['sensitivity_eligible']*100:.2f}%\")\n",
+                    "        print(f\"   • Spécificité Sécurité T3  : {triage_metrics['safety_specificity_type3']*100:.2f}%\")\n",
+                    "        print(f\"   • Triage AUC-ROC           : {triage_metrics['triage_auc_roc']:.4f}\")\n",
+                    "        \n",
+                    "        with open(os.path.join(rep_dir, \"clinical_triage_report.json\"), \"w\", encoding=\"utf-8\") as f_tr:\n",
+                    "            json.dump(triage_metrics, f_tr, indent=4)\n",
+                    "            \n",
+                    "        # Courbe ROC Triage\n",
+                    "        y_true_eligible = (all_targets != 2).astype(int)\n",
+                    "        prob_eligible = all_probs[:, 0] + all_probs[:, 1]\n",
+                    "        if len(np.unique(y_true_eligible)) > 1:\n",
+                    "            fpr, tpr, _ = roc_curve(y_true_eligible, prob_eligible)\n",
+                    "            roc_auc_val = auc(fpr, tpr)\n",
+                    "            plt.figure(figsize=(6, 5))\n",
+                    "            plt.plot(fpr, tpr, color='darkorange', lw=2, label=f'ROC Triage (AUC = {roc_auc_val:.4f})')\n",
+                    "            plt.plot([0, 1], [0, 1], color='navy', lw=2, linestyle='--')\n",
+                    "            plt.xlabel('1 - Spécificité')\n",
+                    "            plt.ylabel('Sensibilité')\n",
+                    "            plt.title('Courbe ROC - Triage Éligibilité Traitement Local')\n",
+                    "            plt.legend(loc=\"lower right\")\n",
+                    "            plt.savefig(os.path.join(fig_dir, \"roc_curve.png\"), dpi=150)\n",
+                    "            plt.show()\n",
+                    "            plt.close()\n",
+                    "            \n",
+                    "        # Sauvegarde du rapport CSV de métriques réelles\n",
+                    "        metrics_df = pd.DataFrame([{\n",
+                    "            \"metric_name\": \"Accuracy Globale\", \"value\": f\"{anat_metrics['accuracy']*100:.2f}%\"\n",
+                    "        }, {\n",
+                    "            \"metric_name\": \"Macro F1-Score\", \"value\": f\"{anat_metrics['macro_f1']:.4f}\"\n",
+                    "        }, {\n",
+                    "            \"metric_name\": \"Macro AUC-ROC\", \"value\": f\"{anat_metrics['macro_auc_roc']:.4f}\"\n",
+                    "        }, {\n",
+                    "            \"metric_name\": \"Triage Accuracy (OMS)\", \"value\": f\"{triage_metrics['triage_accuracy']*100:.2f}%\"\n",
+                    "        }, {\n",
+                    "            \"metric_name\": \"Sécurité Type 3 Référé\", \"value\": f\"{triage_metrics['safety_specificity_type3']*100:.2f}%\"\n",
+                    "        }])\n",
+                    "        metrics_df.to_csv(os.path.join(rep_dir, \"metrics_report.csv\"), index=False)\n",
+                    "        print(f\"📄 Rapport de métriques sauvegardé dans : {os.path.join(rep_dir, 'metrics_report.csv')}\")"
                 ]
             },
             {
@@ -255,7 +305,7 @@ def build_master_kaggle_notebook():
                 "metadata": {},
                 "source": [
                     "## 👁️ Cellule 7 : Audit Visuel Explicable Grad-CAM\n",
-                    "Validation des cartes d'attention visuelle pour s'assurer que le réseau identifie l'acéto-blanchiment."
+                    "Validation des cartes d'attention visuelle pour s'assurer que le réseau identifie la Zone de Transformation."
                 ]
             },
             {
@@ -277,30 +327,28 @@ def build_master_kaggle_notebook():
                     "if not os.path.exists(val_csv):\n",
                     "    val_csv = \"./data/processed/val.csv\"\n",
                     "\n",
-                    "val_ds = IVADataset(csv_file=val_csv, is_train=False)\n",
-                    "if len(val_ds) > 0:\n",
-                    "    sample_tensor, sample_target, _ = val_ds[0]\n",
-                    "    device = torch.device(\"cuda\" if torch.cuda.is_available() else \"cpu\")\n",
-                    "    model = IVALesionClassifierStage2(pretrained=False).to(device)\n",
-                    "    ckpt_path = \"/kaggle/working/models/checkpoints/best_model.pt\"\n",
-                    "    if not os.path.exists(ckpt_path):\n",
-                    "        ckpt_path = \"./models/checkpoints/best_model.pt\"\n",
-                    "    if os.path.exists(ckpt_path):\n",
-                    "        ckpt = torch.load(ckpt_path, map_location=device)\n",
-                    "        state_dict = ckpt.get('model_state_dict', ckpt)\n",
-                    "        # Strip _orig_mod. if model was compiled with torch.compile()\n",
-                    "        new_state_dict = {k.replace(\"_orig_mod.\", \"\"): v for k, v in state_dict.items()}\n",
-                    "        model.load_state_dict(new_state_dict, strict=False)\n",
-                    "        print(f\"💾 Poids entraînés {ckpt_path} chargés avec succès.\")\n",
-                    "    else:\n",
-                    "        print(\"⚠️ Checkpoint introuvable, utilisation du modèle initialisé.\")\n",
-                    "    output_fig = \"/kaggle/working/outputs/figures/gradcam_sample.png\"\n",
-                    "    generate_gradcam_heatmap(\n",
-                    "        model=model,\n",
-                    "        image_tensor=sample_tensor,\n",
-                    "        output_path=output_fig\n",
-                    "    )\n",
-                    "    print(f\"✅ Carte d'attention Grad-CAM générée sous : {output_fig}\")"
+                    "if os.path.exists(val_csv):\n",
+                    "    val_ds = IVADataset(csv_file=val_csv, is_train=False)\n",
+                    "    if len(val_ds) > 0:\n",
+                    "        sample_tensor, sample_target, _ = val_ds[0]\n",
+                    "        device = torch.device(\"cuda\" if torch.cuda.is_available() else \"cpu\")\n",
+                    "        model = IVALesionClassifierStage2(backbone_name=\"convnext_small\", pretrained=False, num_classes=3).to(device)\n",
+                    "        ckpt_path = \"/kaggle/working/models/checkpoints/best_model.pt\"\n",
+                    "        if not os.path.exists(ckpt_path):\n",
+                    "            ckpt_path = \"./models/checkpoints/best_model.pt\"\n",
+                    "        if os.path.exists(ckpt_path):\n",
+                    "            ckpt = torch.load(ckpt_path, map_location=device)\n",
+                    "            state_dict = ckpt.get('model_state_dict', ckpt)\n",
+                    "            new_state_dict = {k.replace(\"_orig_mod.\", \"\"): v for k, v in state_dict.items()}\n",
+                    "            model.load_state_dict(new_state_dict, strict=False)\n",
+                    "            print(f\"💾 Poids entraînés {ckpt_path} chargés avec succès.\")\n",
+                    "        output_fig = \"/kaggle/working/outputs/figures/gradcam_sample.png\"\n",
+                    "        generate_gradcam_heatmap(\n",
+                    "            model=model,\n",
+                    "            image_tensor=sample_tensor,\n",
+                    "            output_path=output_fig\n",
+                    "        )\n",
+                    "        print(f\"✅ Carte d'attention Grad-CAM générée sous : {output_fig}\")"
                 ]
             },
             {
@@ -333,15 +381,23 @@ def build_master_kaggle_notebook():
                     "\n",
                     "export_model_to_onnx(\n",
                     "    checkpoint_path=ckpt_path,\n",
-                    "    output_onnx_path=output_onnx\n",
+                    "    output_onnx_path=output_onnx,\n",
+                    "    img_size=(224, 224),\n",
+                    "    backbone_name=\"convnext_small\"\n",
                     ")\n",
-                    "print(\"🎉 PIPELINE KAGGLE EXÉCUTÉ ET MÉTRIQUES EXPORTÉES AVEC SUCCÈS !\")"
+                    "print(\"🎉 PIPELINE KAGGLE EXÉCUTÉ ET MODÈLE ONNX EXPORTÉ AVEC SUCCÈS !\")"
                 ]
             }
         ],
         "metadata": {
+            "kernelspec": {
+                "display_name": "Python 3",
+                "language": "python",
+                "name": "python3"
+            },
             "language_info": {
-                "name": "python"
+                "name": "python",
+                "version": "3.10"
             }
         },
         "nbformat": 4,
@@ -349,7 +405,8 @@ def build_master_kaggle_notebook():
     }
 
     target_paths = [
-        "./notebooks/LAAFI_AI_IVA_Kaggle_Master_Pipeline.ipynb"
+        "./notebooks/LAAFI_AI_IVA_Kaggle_Master_Pipeline.ipynb",
+        "./notebooks/laafi-ai-via.ipynb"
     ]
 
     for path in target_paths:

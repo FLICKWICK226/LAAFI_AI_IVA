@@ -1,7 +1,6 @@
 import os
 import cv2
 import numpy as np
-import matplotlib.pyplot as plt
 import torch
 
 def generate_gradcam_heatmap(
@@ -80,7 +79,7 @@ def generate_gradcam_heatmap(
     hook_handle.remove()
 
     if len(gradients) == 0 or len(activations) == 0:
-        heatmap = np.zeros((384, 384), dtype=np.float32)
+        heatmap = np.zeros((224, 224), dtype=np.float32)
     else:
         pooled_gradients = torch.mean(gradients[0], dim=[0, 2, 3])
         activation = activations[0][0]
@@ -91,7 +90,7 @@ def generate_gradcam_heatmap(
         heatmap = torch.mean(activation, dim=0).detach().cpu().numpy()
         heatmap = np.maximum(heatmap, 0)
         heatmap /= (np.max(heatmap) + 1e-8)
-        heatmap = cv2.resize(heatmap, (384, 384))
+        heatmap = cv2.resize(heatmap, (224, 224))
 
     # Sauvegarde automatique si output_path est fourni
     if output_path:
@@ -117,24 +116,32 @@ def save_gradcam_audit_figure(image_np: np.ndarray, heatmap: np.ndarray, save_pa
     os.makedirs(os.path.dirname(os.path.abspath(save_path)), exist_ok=True)
     
     heatmap_colored = cv2.applyColorMap(np.uint8(255 * heatmap), cv2.COLORMAP_JET)
-    heatmap_colored = cv2.cvtColor(heatmap_colored, cv2.COLOR_BGR2RGB)
-    
     superimposed = cv2.addWeighted(image_np, 0.6, heatmap_colored, 0.4, 0)
     
-    fig, axes = plt.subplots(1, 3, figsize=(12, 4))
-    axes[0].imshow(image_np)
-    axes[0].set_title("Image d'Origine (Crop JSC)")
-    axes[0].axis('off')
-    
-    axes[1].imshow(heatmap, cmap='jet')
-    axes[1].set_title("Carte d'Attention Grad-CAM")
-    axes[1].axis('off')
-    
-    axes[2].imshow(superimposed)
-    axes[2].set_title("Superposition Clinique")
-    axes[2].axis('off')
-    
-    plt.tight_layout()
-    plt.savefig(save_path, dpi=150)
-    plt.close()
+    try:
+        import matplotlib.pyplot as plt
+        heatmap_rgb = cv2.cvtColor(heatmap_colored, cv2.COLOR_BGR2RGB)
+        superimposed_rgb = cv2.cvtColor(superimposed, cv2.COLOR_BGR2RGB)
+        image_rgb = cv2.cvtColor(image_np, cv2.COLOR_BGR2RGB) if image_np.ndim == 3 else image_np
+
+        fig, axes = plt.subplots(1, 3, figsize=(12, 4))
+        axes[0].imshow(image_rgb)
+        axes[0].set_title("Image d'Origine (Crop JSC)")
+        axes[0].axis('off')
+        
+        axes[1].imshow(heatmap_rgb)
+        axes[1].set_title("Carte d'Attention Grad-CAM")
+        axes[1].axis('off')
+        
+        axes[2].imshow(superimposed_rgb)
+        axes[2].set_title("Superposition Clinique")
+        axes[2].axis('off')
+        
+        plt.tight_layout()
+        plt.savefig(save_path, dpi=150)
+        plt.close()
+    except Exception:
+        # Fallback OpenCV direct
+        combined = np.hstack([image_np, heatmap_colored, superimposed])
+        cv2.imwrite(save_path, combined)
 

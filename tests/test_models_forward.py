@@ -69,3 +69,24 @@ def test_export_onnx_single_head(tmp_path):
     assert len(onnx_proto.graph.output) == 1, "Le modèle doit avoir exactement 1 sortie."
     assert onnx_proto.graph.output[0].name == "logits"
 
+def test_gradcam_generation(tmp_path):
+    """Vérifie la génération d'une heatmap Grad-CAM et la sauvegarde de la figure d'audit."""
+    import os
+    from src.models.classifier_lesion import IVALesionClassifierStage2
+    from src.utils.visualization import generate_gradcam_heatmap
+
+    model = IVALesionClassifierStage2(backbone_name="convnext_small", pretrained=False, num_classes=3)
+    dummy_input = torch.randn(3, 224, 224)
+    save_fig_path = str(tmp_path / "gradcam_test.png")
+
+    heatmap = generate_gradcam_heatmap(
+        model=model,
+        image_tensor=dummy_input,
+        target_class=1,
+        output_path=save_fig_path
+    )
+
+    assert heatmap is not None
+    assert heatmap.ndim == 2
+    assert os.path.exists(save_fig_path), "La figure d'audit Grad-CAM n'a pas été sauvegardée."
+

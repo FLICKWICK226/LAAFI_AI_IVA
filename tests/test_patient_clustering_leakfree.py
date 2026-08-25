@@ -98,9 +98,14 @@ def test_leak_free_split_generation():
             seed=42
         )
 
+        manifest_df = pd.read_csv(os.path.join(temp_out, "manifest_anatomy.csv"))
         train_df = pd.read_csv(os.path.join(temp_out, "train.csv"))
         val_df = pd.read_csv(os.path.join(temp_out, "val.csv"))
         test_df = pd.read_csv(os.path.join(temp_out, "test.csv"))
+
+        # Vérification du manifeste global
+        assert len(manifest_df) == len(train_df) + len(val_df) + len(test_df)
+        assert set(manifest_df.columns) >= {'filepath', 'label', 'target', 'patient_id', 'split'}
 
         # Vérification de l'étanchéité stricte des splits
         train_p = set(train_df['patient_id'])

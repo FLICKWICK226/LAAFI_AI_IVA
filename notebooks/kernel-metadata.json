@@ -7,9 +7,7 @@
   "is_private": "true",
   "enable_gpu": "true",
   "enable_internet": "true",
-  "dataset_sources": [
-    "competitions/intel-mobileodt-cervical-cancer-screening"
-  ],
+  "dataset_sources": [],
   "competition_sources": [
     "intel-mobileodt-cervical-cancer-screening"
   ],

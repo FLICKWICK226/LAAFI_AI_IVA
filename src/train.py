@@ -22,7 +22,12 @@ importlib.reload(src.data.dataset)
 
 from src.data.dataset import IVADataset
 from src.models.classifier_lesion import IVALesionClassifierStage2
-from src.utils.metrics import calculate_clinical_metrics, evaluate_threshold_grid
+from src.utils.metrics import (
+    calculate_clinical_metrics,
+    evaluate_threshold_grid,
+    calculate_anatomical_metrics,
+    calculate_clinical_triage_metrics
+)
 
 def fast_sync_to_ssd(src_dir: str, dst_dir: str) -> None:
     """
@@ -73,11 +78,20 @@ def train_laafi_ai_model(config_path: str = "./config/config.yaml") -> None:
         cfg = yaml.safe_load(f)
 
     seed_everything(cfg['project']['seed'])
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    print(f"🖥️ Exécution de l'entraînement sur : {device}")
+    
+    device = torch.device("cpu")
+    if torch.cuda.is_available():
+        try:
+            # Test d'intégrité CUDA (vérifie la compatibilité de l'architecture GPU avec PyTorch)
+            _t = torch.zeros(1, device='cuda') + 1.0
+            device = torch.device("cuda")
+            torch.cuda.empty_cache()
+        except RuntimeError as e:
+            print(f"⚠️ GPU CUDA détecté mais incompatible avec cette version PyTorch ({e}).")
+            print("🔄 Basculement automatique sécurisé sur CPU.")
+            device = torch.device("cpu")
 
-    if device.type == 'cuda':
-        torch.cuda.empty_cache()
+    print(f"🖥️ Exécution de l'entraînement sur : {device}")
 
     print("\n" + "="*70)
     print("🚀 STEP [2/6] : Synchronisation et résolution des chemins de données...")
@@ -319,6 +333,7 @@ def train_laafi_ai_model(config_path: str = "./config/config.yaml") -> None:
         model.eval()
         val_loss = 0.0
         val_targets, val_probs = [], []
+        val_raw_targets, val_all_probs = [], []
         with torch.no_grad():
             for images, targets, _ in tqdm(val_loader, desc=f"Validation Epoch {epoch}", leave=False):
                 images = images.to(device, non_blocking=True)
@@ -333,14 +348,24 @@ def train_laafi_ai_model(config_path: str = "./config/config.yaml") -> None:
                 prob_positive = (probs[:, 1] + probs[:, 2]).cpu().numpy()
                 val_targets.extend((targets > 0).cpu().numpy())
                 val_probs.extend(prob_positive)
+                val_raw_targets.extend(targets.cpu().numpy())
+                val_all_probs.extend(probs.cpu().numpy())
 
         val_loss /= len(val_dataset) if len(val_dataset) > 0 else 1
         val_targets = np.array(val_targets)
         val_probs = np.array(val_probs)
+        val_raw_targets = np.array(val_raw_targets)
+        val_all_probs = np.array(val_all_probs)
         
         best_threshold = 0.50
         best_metrics = {"auc_roc": 0.5, "sensitivity": 0.0, "specificity": 0.0, "f2_score": 0.0}
+        anat_metrics = {"macro_f1": 0.0, "macro_auc_roc": 0.5, "accuracy": 0.0}
+        triage_metrics = {"safety_specificity_type3": 0.0, "triage_accuracy": 0.0}
         
+        if len(val_raw_targets) > 0 and len(np.unique(val_raw_targets)) > 1:
+            anat_metrics = calculate_anatomical_metrics(val_raw_targets, val_all_probs)
+            triage_metrics = calculate_clinical_triage_metrics(val_raw_targets, val_all_probs)
+
         if len(val_targets) > 0 and len(np.unique(val_targets)) > 1:
             t_cfg = cfg['stage2_classifier'].get('threshold_calibration', {})
             min_t = float(t_cfg.get('min_t', 0.05))
@@ -362,7 +387,7 @@ def train_laafi_ai_model(config_path: str = "./config/config.yaml") -> None:
                 best_metrics = grid_res['optimal']
                 best_threshold = best_metrics['threshold']
 
-        print(f"📊 Epoch {epoch} Terminée | Train Loss: {train_loss:.4f} | Val Loss: {val_loss:.4f} | Val AUC: {best_metrics['auc_roc']:.4f} | Sensibilité: {best_metrics['sensitivity']*100:.1f}% | Spécificité: {best_metrics.get('specificity', 0)*100:.1f}% | Youden J: {best_metrics.get('youden_index', 0):.4f} | Score F2: {best_metrics.get('f2_score', 0):.4f} (Seuil Optimal T: {best_threshold:.2f})")
+        print(f"📊 Epoch {epoch} Terminée | Train Loss: {train_loss:.4f} | Val Loss: {val_loss:.4f} | Macro-F1: {anat_metrics['macro_f1']:.4f} | Macro-AUC: {anat_metrics['macro_auc_roc']:.4f} | Sensibilité Dépistage: {best_metrics['sensitivity']*100:.1f}% | Spécificité: {best_metrics.get('specificity', 0)*100:.1f}% | Sécurité Type 3: {triage_metrics.get('safety_specificity_type3', 0)*100:.1f}%")
 
         # Mise à jour des rapports d'entraînement
         os.makedirs(reports_dir, exist_ok=True)

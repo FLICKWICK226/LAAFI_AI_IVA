@@ -71,16 +71,7 @@ class CervicalImageQualityFilter:
             result["rejection_reason"] = f"RESOLUTION_TOO_LOW: {w}x{h}"
             return result
 
-        # 2. Évaluation du flou (Variance du Laplacien)
-        gray = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY)
-        laplacian_var = float(cv2.Laplacian(gray, cv2.CV_64F).var())
-        result["laplacian_variance"] = round(laplacian_var, 2)
-
-        if laplacian_var < self.min_laplacian_var:
-            result["rejection_reason"] = f"BLURRY_IMAGE (var={laplacian_var:.1f} < {self.min_laplacian_var})"
-            return result
-
-        # 3. Évaluation de l'exposition (Espace HSV)
+        # 2. Évaluation de l'exposition (Espace HSV)
         hsv = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2HSV)
         v_channel = hsv[:, :, 2]
         total_pixels = float(h * w)
@@ -99,6 +90,15 @@ class CervicalImageQualityFilter:
 
         if underexposed_ratio > self.max_underexposed_ratio:
             result["rejection_reason"] = f"UNDEREXPOSED_DARK (ratio={underexposed_ratio:.2f})"
+            return result
+
+        # 3. Évaluation du flou (Variance du Laplacien)
+        gray = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY)
+        laplacian_var = float(cv2.Laplacian(gray, cv2.CV_64F).var())
+        result["laplacian_variance"] = round(laplacian_var, 2)
+
+        if laplacian_var < self.min_laplacian_var:
+            result["rejection_reason"] = f"BLURRY_IMAGE (var={laplacian_var:.1f} < {self.min_laplacian_var})"
             return result
 
         # Image conforme

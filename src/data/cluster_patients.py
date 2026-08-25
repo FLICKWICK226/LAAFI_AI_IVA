@@ -122,13 +122,18 @@ def compute_image_hashes(image_paths: list, hash_size: int = 8) -> tuple:
 
 def cluster_images_by_perceptual_hash(
     image_paths: list,
-    labels: list,
+    labels: list = None,
     max_hamming_distance: int = 6,
-    batch_size: int = 2000
+    batch_size: int = 2000,
+    ambiguous_report_path: str = "./reports/ambiguous_clusters.csv"
 ) -> list:
     """
     Regroupe les images quasi-identiques (rafales vidéo, même examen colposcopique)
     dans des clusters patients étanches en utilisant la distance de Hamming et les composantes connexes.
+    
+    Garantie ZÉRO FUITE : Aucun filtrage par label n'est appliqué lors du regroupement,
+    assurant que deux clichés du même examen ne soient jamais séparés entre train et test.
+    Les clusters présentant des labels contradictoires sont isolés dans un registre d'ambiguïté.
     """
     num_images = len(image_paths)
     if num_images == 0:
@@ -162,12 +167,10 @@ def cluster_images_by_perceptual_hash(
                 idx_i = i + r
                 idx_j = j + c
                 if idx_i != idx_j:
-                    # Sécurité : ne relier que les images de même classe
-                    if labels[idx_i] == labels[idx_j]:
-                        row_ind.append(idx_i)
-                        col_ind.append(idx_j)
-                        row_ind.append(idx_j)
-                        col_ind.append(idx_i)
+                    row_ind.append(idx_i)
+                    col_ind.append(idx_j)
+                    row_ind.append(idx_j)
+                    col_ind.append(idx_i)
 
     # 3. Calcul des composantes connexes (Connected Components)
     data = np.ones(len(row_ind), dtype=int)
@@ -175,6 +178,37 @@ def cluster_images_by_perceptual_hash(
     n_components, comp_labels = connected_components(adj_sparse, directed=False)
     
     patient_ids = [f"patient_cluster_{c:05d}" for c in comp_labels]
+    
+    # 4. Audit & Traçabilité des clusters à labels contradictoires (Ambiguïté clinique)
+    if labels is not None and len(labels) == num_images:
+        cluster_to_labels = {}
+        for idx, (p_id, lbl, path) in enumerate(zip(patient_ids, labels, image_paths)):
+            if p_id not in cluster_to_labels:
+                cluster_to_labels[p_id] = []
+            cluster_to_labels[p_id].append((idx, path, lbl))
+            
+        ambiguous_rows = []
+        for p_id, items in cluster_to_labels.items():
+            distinct_labels = set(lbl for _, _, lbl in items)
+            if len(distinct_labels) > 1:
+                for idx, path, lbl in items:
+                    ambiguous_rows.append({
+                        "patient_id": p_id,
+                        "filepath": path,
+                        "label": lbl,
+                        "cluster_distinct_labels": ";".join(sorted(list(distinct_labels))),
+                        "cluster_size": len(items)
+                    })
+        
+        if ambiguous_rows:
+            ambiguous_df = pd.DataFrame(ambiguous_rows)
+            os.makedirs(os.path.dirname(os.path.abspath(ambiguous_report_path)), exist_ok=True)
+            ambiguous_df.to_csv(ambiguous_report_path, index=False)
+            print(f"⚠️ {len(set(r['patient_id'] for r in ambiguous_rows))} clusters à labels discordants isolés dans : {ambiguous_report_path}")
+        else:
+            if ambiguous_report_path:
+                os.makedirs(os.path.dirname(os.path.abspath(ambiguous_report_path)), exist_ok=True)
+                pd.DataFrame(columns=["patient_id", "filepath", "label", "cluster_distinct_labels", "cluster_size"]).to_csv(ambiguous_report_path, index=False)
     
     # Statistiques du clustering
     unique_clusters, counts = np.unique(patient_ids, return_counts=True)
@@ -293,6 +327,7 @@ def generate_patient_clusters_and_splits(
     print("🛡️ VALIDATION ÉTANCHÉITÉ : 0 patient partagé entre les splits (Zéro Fuite de Données).")
 
     # 4. Sauvegarde des CSVs
+    df.to_csv(os.path.join(output_dir, 'manifest_anatomy.csv'), index=False)
     train_df.to_csv(os.path.join(output_dir, 'train.csv'), index=False)
     val_df.to_csv(os.path.join(output_dir, 'val.csv'), index=False)
     test_df.to_csv(os.path.join(output_dir, 'test.csv'), index=False)
