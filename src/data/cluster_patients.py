@@ -357,5 +357,12 @@ def generate_patient_clusters_and_splits(
     print(f"📊 Total images : {len(df)} (Train: {len(train_df)} | Val: {len(val_df)} | Test: {len(test_df)})")
     print(f"📊 Total patient clusters : {len(np.unique(patient_ids))} (Train: {len(train_patients)} | Val: {len(val_patients)} | Test: {len(test_patients)})")
 
+    # 5. Compilation binaire Memory-Mapped (.mmap / .npy) pour un débit DataLoader optimal (0 ms d'I/O)
+    try:
+        from src.data.convert_to_mmap import convert_splits_to_mmap
+        convert_splits_to_mmap(processed_dir=output_dir, output_dir=output_dir)
+    except Exception as e_m:
+        print(f"⚠️ Remarque compilation mmap : {e_m}")
+
 if __name__ == "__main__":
     generate_patient_clusters_and_splits()
