@@ -40,6 +40,7 @@ class IVADataset(Dataset):
 
         self.perlin_loader = FastPerlinNoiseLoader(masks_dir=masks_dir)
         self.transform = build_iva_augmentation_pipeline(is_train=is_train)
+        self.cache = {} # Cache RAM pour les images 224x224 (0 ms d'I/O après le 1er accès)
         
         # Chargement du dataframe CSV
         if os.path.exists(csv_file):
@@ -73,26 +74,34 @@ class IVADataset(Dataset):
         target = int(row['target'])
         patient_id = row.get('patient_id', 'unknown')
 
-        # Lecture ultra-rapide de l'image (BGR -> RGB)
-        image = None
-        if os.path.exists(img_path):
-            image = cv2.imread(img_path)
-        
-        if image is not None and image.size > 0:
-            image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-            # Downsampling immédiat en résolution de travail (224x224) pour accélérer le DataLoader de 10x
-            if image.shape[0] != 224 or image.shape[1] != 224:
-                image = cv2.resize(image, (224, 224), interpolation=cv2.INTER_AREA)
+        # 1. Récupération directe depuis le Cache RAM si présent (0 ms I/O)
+        if img_path in self.cache:
+            base_image = self.cache[img_path]
         else:
-            # Fallback image noire si fichier illisible
-            image = np.zeros((224, 224, 3), dtype=np.uint8)
+            image = None
+            if os.path.exists(img_path):
+                image = cv2.imread(img_path)
+            
+            if image is not None and image.size > 0:
+                image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+                # Downsampling immédiat en résolution de travail (224x224)
+                if image.shape[0] != 224 or image.shape[1] != 224:
+                    image = cv2.resize(image, (224, 224), interpolation=cv2.INTER_AREA)
+                base_image = image
+            else:
+                base_image = np.zeros((224, 224, 3), dtype=np.uint8)
+            
+            # Mise en cache pour les époques suivantes
+            self.cache[img_path] = base_image
 
-        # Injection dynamique de masques de bruit biologiques (uniquement en train)
+        image = base_image.copy()
+
+        # 2. Injection dynamique de masques de bruit biologiques (uniquement en train)
         if self.is_train and np.random.rand() < self.perlin_proba:
             noise_type = np.random.choice(['blood', 'mucus'])
             image = self.perlin_loader.add_blood_or_mucus(image, noise_type=noise_type)
 
-        # Transformation Albumentations
+        # 3. Transformation Albumentations ultra-rapide
         augmented = self.transform(image=image)
         image_tensor = torch.as_tensor(augmented['image']).permute(2, 0, 1).float()
 

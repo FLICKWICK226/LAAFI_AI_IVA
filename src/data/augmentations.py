@@ -63,9 +63,9 @@ class FastPerlinNoiseLoader:
         blended = (image * (1.0 - alpha_scaled) + overlay * alpha_scaled).astype(np.uint8)
         return blended
 
-def build_iva_augmentation_pipeline(is_train: bool = True, img_size: tuple = (224, 224), specular_proba: float = 0.4) -> A.Compose:
+def build_iva_augmentation_pipeline(is_train: bool = True, img_size: tuple = (224, 224), specular_proba: float = 0.3) -> A.Compose:
     """
-    Pipeline d'augmentation rapide et robuste pour imagerie de terrain IVA.
+    Pipeline d'augmentation C++ ultra-rapide et robuste pour imagerie de terrain IVA.
     Hue Shift strictly <= 0.05 per Rule 3.
     """
     h, w = img_size
@@ -80,15 +80,12 @@ def build_iva_augmentation_pipeline(is_train: bool = True, img_size: tuple = (22
         A.HorizontalFlip(p=0.5),
         A.VerticalFlip(p=0.5),
         A.RandomRotate90(p=0.5),
+        A.ShiftScaleRotate(shift_limit=0.0625, scale_limit=0.1, rotate_limit=15, p=0.5),
         A.OneOf([
-            A.Defocus(radius=(1, 4), alias_blur=(0.1, 0.4), p=0.5),
-            A.MotionBlur(blur_limit=(3, 9), p=0.5),
-        ], p=0.5),
-        A.RandomSunFlare(
-            flare_roi=(0.1, 0.1, 0.9, 0.9),
-            p=specular_proba
-        ),
-        A.ColorJitter(brightness=0.25, contrast=0.25, saturation=0.20, hue=0.05, p=0.5),
+            A.GaussianBlur(blur_limit=(3, 5), p=0.5),
+            A.MotionBlur(blur_limit=3, p=0.5),
+        ], p=0.4),
+        A.ColorJitter(brightness=0.20, contrast=0.20, saturation=0.15, hue=0.05, p=0.5),
         A.Normalize(mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225)),
     ])
 

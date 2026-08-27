@@ -209,13 +209,10 @@ def train_laafi_ai_model(config_path: str = "./config/config.yaml") -> None:
         drop_rate=float(cfg['stage2_classifier'].get('drop_rate', 0.2))
     ).to(device)
 
+    if device.type == "cuda":
+        raw_model = raw_model.to(memory_format=torch.channels_last)
+
     model = raw_model
-    if hasattr(torch, "compile") and device.type == "cuda":
-        try:
-            model = torch.compile(raw_model)
-            print("⚡ LEVIER 2 APPLIQUÉ : Modèle compilé via torch.compile().")
-        except Exception as e_comp:
-            print(f"⚠️ Remarque torch.compile non appliqué : {e_comp}")
 
     # Fonction de coût unifiée et symétrique avec label smoothing
     label_smoothing = float(cfg['stage2_classifier'].get('label_smoothing', 0.05))
@@ -296,7 +293,10 @@ def train_laafi_ai_model(config_path: str = "./config/config.yaml") -> None:
 
         pbar = tqdm(train_loader, desc=f"Epoch {epoch}/{cfg['stage2_classifier']['epochs']}", unit="batch")
         for step, (images, targets, _) in enumerate(pbar):
-            images = images.to(device, non_blocking=True)
+            if device.type == 'cuda':
+                images = images.to(device, memory_format=torch.channels_last, non_blocking=True)
+            else:
+                images = images.to(device, non_blocking=True)
             targets = targets.to(device, non_blocking=True)
 
             with torch.amp.autocast('cuda', enabled=(device.type == 'cuda')):
@@ -336,7 +336,10 @@ def train_laafi_ai_model(config_path: str = "./config/config.yaml") -> None:
         val_raw_targets, val_all_probs = [], []
         with torch.no_grad():
             for images, targets, _ in tqdm(val_loader, desc=f"Validation Epoch {epoch}", leave=False):
-                images = images.to(device, non_blocking=True)
+                if device.type == 'cuda':
+                    images = images.to(device, memory_format=torch.channels_last, non_blocking=True)
+                else:
+                    images = images.to(device, non_blocking=True)
                 targets = targets.to(device, non_blocking=True)
                 with torch.amp.autocast('cuda', enabled=(device.type == 'cuda')):
                     logits = model(images)
