@@ -7,14 +7,17 @@ from src.preprocessing.cervix_transforms import SpecularReflectionMasker
 class FastPerlinNoiseLoader:
     """
     Chargeur ultra-optimisé de masques de bruit de Perlin.
-    Les masques sont floutés et pré-chargés en RAM pour des augmentations à 0 ms d'E/S.
+    Les masques sont floutés, redimensionnés en (224, 224) et pré-chargés en RAM pour des augmentations à 0 ms d'E/S.
     """
-    def __init__(self, masks_dir: str = "./data/synthetic_masks", max_cached_masks: int = 1000):
-        # Résolution automatique SSD local si disponible sous Colab
+    def __init__(self, masks_dir: str = "./data/synthetic_masks", target_size: tuple = (224, 224), max_cached_masks: int = 1000):
+        # Résolution automatique SSD local si disponible sous Colab ou Kaggle
         if os.path.exists("/content/data_fast/synthetic_masks"):
             masks_dir = "/content/data_fast/synthetic_masks"
+        elif os.path.exists("/kaggle/working/data/synthetic_masks"):
+            masks_dir = "/kaggle/working/data/synthetic_masks"
             
         self.masks_dir = masks_dir
+        self.target_size = target_size
         self.masks_cache = []
         
         if os.path.exists(masks_dir):
@@ -23,14 +26,16 @@ class FastPerlinNoiseLoader:
                 for mf in mask_files:
                     try:
                         perlin = np.load(mf).astype(np.float32)
-                        # Pré-calcul du flou gaussien une seule fois lors du chargement RAM
+                        # Pré-calcul du flou gaussien et redimensionnement immédiat en RAM
                         mask = (perlin > 0.6).astype(np.float32)
-                        mask_blurred = cv2.GaussianBlur(mask, (15, 15), 0)[:, :, np.newaxis]
-                        self.masks_cache.append(mask_blurred)
+                        mask_blurred = cv2.GaussianBlur(mask, (15, 15), 0)
+                        if mask_blurred.shape[:2] != target_size:
+                            mask_blurred = cv2.resize(mask_blurred, target_size, interpolation=cv2.INTER_AREA)
+                        self.masks_cache.append(mask_blurred[:, :, np.newaxis].astype(np.float32))
                     except Exception:
                         pass
                 if len(self.masks_cache) > 0:
-                    print(f"🚀 {len(self.masks_cache)} masques de Perlin floutés et mis en cache RAM.")
+                    print(f"🚀 {len(self.masks_cache)} masques de Perlin ({target_size[0]}x{target_size[1]}) mis en cache RAM.")
 
     def add_blood_or_mucus(self, image: np.ndarray, noise_type: str = 'blood', max_alpha: float = 0.4) -> np.ndarray:
         if not self.masks_cache:
@@ -43,8 +48,8 @@ class FastPerlinNoiseLoader:
         if alpha.shape[:2] != (h, w):
             alpha = cv2.resize(alpha, (w, h), interpolation=cv2.INTER_LINEAR)[:, :, np.newaxis]
             
-        alpha = alpha * max_alpha
-        overlay = image.copy()
+        alpha_scaled = alpha * max_alpha
+        overlay = np.empty_like(image)
         
         if noise_type == 'blood':
             overlay[:, :, 0] = np.random.randint(10, 30)   # B
@@ -55,7 +60,7 @@ class FastPerlinNoiseLoader:
             overlay[:, :, 1] = np.random.randint(200, 220) # G
             overlay[:, :, 2] = np.random.randint(210, 230) # R
 
-        blended = (image * (1.0 - alpha) + overlay * alpha).astype(np.uint8)
+        blended = (image * (1.0 - alpha_scaled) + overlay * alpha_scaled).astype(np.uint8)
         return blended
 
 def build_iva_augmentation_pipeline(is_train: bool = True, img_size: tuple = (224, 224), specular_proba: float = 0.4) -> A.Compose:

@@ -73,16 +73,19 @@ class IVADataset(Dataset):
         target = int(row['target'])
         patient_id = row.get('patient_id', 'unknown')
 
-        # Lecture rapide de l'image (BGR -> RGB)
+        # Lecture ultra-rapide de l'image (BGR -> RGB)
         image = None
         if os.path.exists(img_path):
             image = cv2.imread(img_path)
         
         if image is not None and image.size > 0:
             image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+            # Downsampling immédiat en résolution de travail (224x224) pour accélérer le DataLoader de 10x
+            if image.shape[0] != 224 or image.shape[1] != 224:
+                image = cv2.resize(image, (224, 224), interpolation=cv2.INTER_AREA)
         else:
             # Fallback image noire si fichier illisible
-            image = np.zeros((384, 384, 3), dtype=np.uint8)
+            image = np.zeros((224, 224, 3), dtype=np.uint8)
 
         # Injection dynamique de masques de bruit biologiques (uniquement en train)
         if self.is_train and np.random.rand() < self.perlin_proba:
@@ -91,7 +94,7 @@ class IVADataset(Dataset):
 
         # Transformation Albumentations
         augmented = self.transform(image=image)
-        image_tensor = torch.tensor(augmented['image']).permute(2, 0, 1).float()
+        image_tensor = torch.as_tensor(augmented['image']).permute(2, 0, 1).float()
 
         return image_tensor, torch.tensor(target, dtype=torch.long), patient_id
 
