@@ -13,6 +13,9 @@ import argparse
 import base64
 from pathlib import Path
 
+os.environ["PYTHONIOENCODING"] = "utf-8"
+os.environ["PYTHONLEGACYWINDOWSSTDIO"] = "0"
+
 if sys.platform == 'win32':
     import io
     try:

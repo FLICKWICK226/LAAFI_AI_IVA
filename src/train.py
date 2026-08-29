@@ -74,6 +74,23 @@ def train_laafi_ai_model(config_path: str = "./config/config.yaml") -> None:
     print("🚀 STEP [1/6] : Chargement de la configuration & Graine aléatoire...")
     print("="*70)
 
+    # Résolution robuste multi-chemins du fichier config.yaml
+    if not os.path.exists(config_path):
+        candidates = [
+            os.path.join(os.getcwd(), config_path),
+            os.path.join(os.path.dirname(__file__), "..", "config", "config.yaml"),
+            os.path.join(os.path.dirname(__file__), "..", config_path),
+            "/kaggle/working/LAAFI_AI_IVA/config/config.yaml",
+            "/kaggle/working/config/config.yaml",
+            "./config/config.yaml",
+            "../config/config.yaml",
+        ]
+        for cand in candidates:
+            if os.path.exists(cand):
+                config_path = cand
+                break
+
+    print(f"📖 Lecture de la configuration depuis : {config_path}")
     with open(config_path, "r", encoding="utf-8") as f:
         cfg = yaml.safe_load(f)
 
@@ -112,11 +129,15 @@ def train_laafi_ai_model(config_path: str = "./config/config.yaml") -> None:
     if os.path.exists("/kaggle/working"):
         if os.path.exists("/kaggle/working/data/processed/train.csv"):
             processed_dir = "/kaggle/working/data/processed"
+        elif os.path.exists("/kaggle/working/LAAFI_AI_IVA/data/processed/train.csv"):
+            processed_dir = "/kaggle/working/LAAFI_AI_IVA/data/processed"
         elif not os.path.exists(os.path.join(processed_dir, "train.csv")) and os.path.exists("../data/processed/train.csv"):
             processed_dir = "../data/processed"
             
         if os.path.exists("/kaggle/working/data/synthetic_masks"):
             masks_dir = "/kaggle/working/data/synthetic_masks"
+        elif os.path.exists("/kaggle/working/LAAFI_AI_IVA/data/synthetic_masks"):
+            masks_dir = "/kaggle/working/LAAFI_AI_IVA/data/synthetic_masks"
             
         checkpoints_dir = "/kaggle/working/models/checkpoints"
         logs_dir = "/kaggle/working/outputs/logs"

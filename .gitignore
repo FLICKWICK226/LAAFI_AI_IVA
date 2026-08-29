@@ -72,6 +72,9 @@ outputs/pulled_v2_latest/
 outputs/failed_kernel_log/
 outputs/kaggle_log_direct/
 outputs/kaggle_laafi_v2/
+outputs/pulled_failed_run/
+outputs/pulled_kernel_logs_all/
+outputs/kaggle_remote_run*/
 outputs/test_out/
 outputs/kaggle_remote*
 *.log
