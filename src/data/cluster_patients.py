@@ -18,10 +18,22 @@ if hasattr(sys.stdout, 'reconfigure'):
         pass
 
 
-def extract_archives_if_needed(target_dir: str) -> None:
+def extract_archives_if_needed(target_dir: str, extract_to_dir: str = None) -> str:
     """
     Extrait automatiquement les archives .zip ou .7z si aucune image non compressée n'est présente.
+    Garantit que la destination d'extraction est toujours sur un système de fichiers inscriptible
+    (ex: /kaggle/working/data/raw sous Kaggle, et jamais sur /kaggle/input qui est en lecture seule).
     """
+    if extract_to_dir is None:
+        if os.path.exists("/kaggle/working"):
+            extract_to_dir = "/kaggle/working/data/raw"
+        elif os.path.exists("/content/data_fast"):
+            extract_to_dir = "/content/data_fast/raw"
+        else:
+            extract_to_dir = target_dir
+
+    os.makedirs(extract_to_dir, exist_ok=True)
+
     try:
         import py7zr
     except ImportError:
@@ -32,16 +44,21 @@ def extract_archives_if_needed(target_dir: str) -> None:
         for file in files:
             full_path = os.path.join(root, file)
             if file.endswith('.zip'):
-                print(f"📦 Extraction de l'archive ZIP : {file}...")
-                with zipfile.ZipFile(full_path, 'r') as zip_ref:
-                    zip_ref.extractall(target_dir)
-            elif file.endswith('.7z'):
-                print(f"📦 Extraction de l'archive 7Z : {file}...")
+                print(f"📦 Extraction de l'archive ZIP : {file} vers {extract_to_dir}...")
                 try:
-                    with py7zr.SevenZipFile(full_path, mode='r') as z:
-                        z.extractall(path=target_dir)
+                    with zipfile.ZipFile(full_path, 'r') as zip_ref:
+                        zip_ref.extractall(extract_to_dir)
                 except Exception as e:
                     print(f"⚠️ Impossible d'extraire {file} : {e}")
+            elif file.endswith('.7z'):
+                print(f"📦 Extraction de l'archive 7Z : {file} vers {extract_to_dir}...")
+                try:
+                    with py7zr.SevenZipFile(full_path, mode='r') as z:
+                        z.extractall(path=extract_to_dir)
+                except Exception as e:
+                    print(f"⚠️ Impossible d'extraire {file} : {e}")
+
+    return extract_to_dir
 
 def get_class_label(path: str) -> str:
     """
@@ -237,33 +254,44 @@ def generate_patient_clusters_and_splits(
     # Auto-détection du dossier de sortie sous Kaggle / Colab
     if os.path.exists("/kaggle/working"):
         output_dir = "/kaggle/working/data/processed"
+        writable_raw_dir = "/kaggle/working/data/raw"
     elif os.path.exists("/content/data_fast"):
         output_dir = "./data/processed"
+        writable_raw_dir = "/content/data_fast/raw"
+    else:
+        output_dir = output_dir
+        writable_raw_dir = resolved_raw_dir
 
     os.makedirs(output_dir, exist_ok=True)
+    os.makedirs(writable_raw_dir, exist_ok=True)
     
     print(f"🔍 Indexation et recherche des images depuis : {resolved_raw_dir}...")
     
-    image_paths = []
-    labels = []
-    all_files = []
-    
-    for root, _, files in os.walk(resolved_raw_dir, followlinks=True):
-        for f in files:
-            if f.lower().endswith(('.jpg', '.jpeg', '.png')):
-                all_files.append(os.path.join(root, f))
+    scan_dirs = [resolved_raw_dir]
+    if os.path.abspath(writable_raw_dir) != os.path.abspath(resolved_raw_dir) and os.path.exists(writable_raw_dir):
+        scan_dirs.append(writable_raw_dir)
 
-    # Si aucune image brute n'est trouvée, chercher et extraire les archives .zip / .7z
-    if len(all_files) == 0 and os.path.exists("/kaggle/working"):
-        print("⚠️ Aucune image décompressée trouvée. Tentative d'extraction des archives .zip/.7z...")
-        extract_archives_if_needed(resolved_raw_dir)
-        
-        all_files = []
-        for root, _, files in os.walk(resolved_raw_dir, followlinks=True):
+    all_files = []
+    for s_dir in scan_dirs:
+        for root, _, files in os.walk(s_dir, followlinks=True):
             for f in files:
                 if f.lower().endswith(('.jpg', '.jpeg', '.png')):
                     all_files.append(os.path.join(root, f))
 
+    # Si aucune image brute n'est trouvée, chercher et extraire les archives .zip / .7z
+    if len(all_files) == 0:
+        print(f"⚠️ Aucune image décompressée trouvée. Tentative d'extraction des archives vers {writable_raw_dir}...")
+        extracted_dir = extract_archives_if_needed(resolved_raw_dir, extract_to_dir=writable_raw_dir)
+        
+        all_files = []
+        for s_dir in set([resolved_raw_dir, extracted_dir]):
+            for root, _, files in os.walk(s_dir, followlinks=True):
+                for f in files:
+                    if f.lower().endswith(('.jpg', '.jpeg', '.png')):
+                        all_files.append(os.path.join(root, f))
+
+    image_paths = []
+    labels = []
     for full_path in tqdm(all_files, desc="Indexation des classes d'images"):
         cls_label = get_class_label(full_path)
         if cls_label is not None:

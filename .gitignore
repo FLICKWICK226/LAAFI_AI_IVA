@@ -67,9 +67,16 @@ outputs/logs/*
 !outputs/logs/.gitkeep
 outputs/figures_extracted/
 outputs/pulled_notebooks/
+outputs/pulled_v2/
+outputs/pulled_v2_latest/
+outputs/failed_kernel_log/
+outputs/kaggle_log_direct/
+outputs/kaggle_laafi_v2/
+outputs/test_out/
 outputs/kaggle_remote*
 *.log
 .tensorboard/
+scratch/
 
 # 6. IDEs & Documents de Spécifications Internes (Obsidian / Agent Specs)
 .obsidian/
@@ -77,9 +84,11 @@ outputs/kaggle_remote*
 .vscode/
 .DS_Store
 AGENT.md
+SENIOR.md
 COMMON_MISTAKE_TO_AVOID.md
 LAAFI_AI_IVA_KANBAN-BOARD.md
 MEMORY.MD
+MEMORY.md
 skills_report.md
 tmp_*.json
 usefuls*.md

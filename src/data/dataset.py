@@ -1,23 +1,25 @@
 import os
 import json
-import cv2
 import numpy as np
 import pandas as pd
 import torch
 from torch.utils.data import Dataset
-from src.data.augmentations import FastPerlinNoiseLoader, build_iva_augmentation_pipeline
+from typing import Optional
+from src.preprocessing.cervix_pipeline import CervicalImagePipeline
 
 class IVADataset(Dataset):
     """
-    Dataset PyTorch hautement optimisé pour l'imagerie IVA du col de l'utérus.
-    Résout automatiquement les chemins Google Drive FUSE et Kaggle vers le SSD local rapide.
+    Dataset PyTorch pour l'imagerie IVA du col de l'utérus.
+    Délègue l'ensemble des transformations et de l'ingestion à CervicalImagePipeline.
+    Prend en charge les conteneurs Memory-Mapped binaires (.mmap/.npy) pour une vitesse I/O maximale.
     """
     def __init__(
         self,
         csv_file: str,
         is_train: bool = True,
         masks_dir: str = "./data/synthetic_masks",
-        perlin_proba: float = 0.30
+        perlin_proba: float = 0.30,
+        pipeline: Optional[CervicalImagePipeline] = None
     ):
         self.is_train = is_train
         self.perlin_proba = perlin_proba
@@ -39,9 +41,16 @@ class IVADataset(Dataset):
         if os.path.exists("/content/data_fast/synthetic_masks"):
             masks_dir = "/content/data_fast/synthetic_masks"
 
-        self.perlin_loader = FastPerlinNoiseLoader(masks_dir=masks_dir)
-        self.transform = build_iva_augmentation_pipeline(is_train=is_train)
-        self.cache = {} # Cache RAM pour les images 224x224 (0 ms d'I/O après le 1er accès)
+        # Injection de dépendance du pipeline de prétraitement deep
+        if pipeline is not None:
+            self.pipeline = pipeline
+        else:
+            self.pipeline = CervicalImagePipeline(
+                img_size=(224, 224),
+                perlin_proba=perlin_proba,
+                masks_dir=masks_dir
+            )
+
         self.mmap_images = None
         self.targets = None
         self.patient_ids = None
@@ -100,45 +109,19 @@ class IVADataset(Dataset):
         return len(self.df)
 
     def __getitem__(self, idx: int):
-        # 1. Branche Memory-Mapped Ultra-Rapide (0 appel système, lecture directe mémoire OS)
+        # 1. Résolution de la source de l'image (mmap ou chemin de fichier)
         if self.mmap_images is not None and self.targets is not None:
-            base_image = np.array(self.mmap_images[idx], copy=True)
+            raw_input = np.array(self.mmap_images[idx], copy=True)
             target = int(self.targets[idx])
             patient_id = self.patient_ids[idx] if self.patient_ids and idx < len(self.patient_ids) else 'unknown'
         else:
             row = self.df.iloc[idx]
-            img_path = str(row['filepath'])
+            raw_input = str(row['filepath'])
             target = int(row['target'])
             patient_id = row.get('patient_id', 'unknown')
 
-            # Récupération directe depuis le Cache RAM si présent (0 ms I/O)
-            if img_path in self.cache:
-                base_image = self.cache[img_path]
-            else:
-                image = None
-                if os.path.exists(img_path):
-                    image = cv2.imread(img_path)
-                
-                if image is not None and image.size > 0:
-                    image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-                    if image.shape[0] != 224 or image.shape[1] != 224:
-                        image = cv2.resize(image, (224, 224), interpolation=cv2.INTER_AREA)
-                    base_image = image
-                else:
-                    base_image = np.zeros((224, 224, 3), dtype=np.uint8)
-                
-                self.cache[img_path] = base_image
-
-            base_image = base_image.copy()
-
-        # 2. Injection dynamique de masques de bruit biologiques (uniquement en train)
-        if self.is_train and np.random.rand() < self.perlin_proba:
-            noise_type = np.random.choice(['blood', 'mucus'])
-            base_image = self.perlin_loader.add_blood_or_mucus(base_image, noise_type=noise_type)
-
-        # 3. Transformation Albumentations ultra-rapide
-        augmented = self.transform(image=base_image)
-        image_tensor = torch.as_tensor(augmented['image']).permute(2, 0, 1).float()
+        # 2. Délégation intégrale au deep module CervicalImagePipeline
+        image_tensor = self.pipeline.process(raw_input, is_train=self.is_train)
 
         return image_tensor, torch.tensor(target, dtype=torch.long), patient_id
 

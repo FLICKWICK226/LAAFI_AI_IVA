@@ -1,6 +1,6 @@
 {
-  "id": "flickwick/laafi-ai-via-v2",
-  "title": "LAAFI_AI_VIA_V2",
+  "id": "flickwick/laafi-ai-training",
+  "title": "LAAFI_AI_TRAINING",
   "code_file": "laafi-ai-via.ipynb",
   "language": "python",
   "kernel_type": "notebook",
