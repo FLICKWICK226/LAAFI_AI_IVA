@@ -7,11 +7,14 @@ def export_model_to_onnx(
     checkpoint_path: str = "./models/checkpoints/best_model.pt",
     output_onnx_path: str = "./models/exported/best_model.onnx",
     img_size: tuple = (224, 224),
-    backbone_name: str = None
+    backbone_name: str = None,
+    ckpt_path: str = None
 ) -> None:
     """
     Exporte le modèle Stage 2 Unifié (Single-Head 3-Classes) au format ONNX pour inférence mobile.
     """
+    if checkpoint_path == "./models/checkpoints/best_model.pt" and ckpt_path is not None:
+        checkpoint_path = ckpt_path
     os.makedirs(os.path.dirname(os.path.abspath(output_onnx_path)), exist_ok=True)
     device = torch.device("cpu")
     
